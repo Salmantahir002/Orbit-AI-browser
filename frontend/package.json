@@ -16,17 +16,14 @@
     "electron:build": "tsc -p electron/tsconfig.json",
     "electron:start": "npm run build && concurrently -k -n BACKEND,ELECTRON \"npm run backend:prod\" \"wait-on http-get://127.0.0.1:8000/api/v1/health && electron .\"",
     "build": "npm run backend:build && tsc -b && npm run electron:build && vite build",
-    "package": "npm run build && electron-builder",
-    "package:dir": "npm run build && electron-builder --dir",
+    "package:stage": "node scripts/stage-backend.mjs",
+    "package": "npm run build && npm run package:stage && electron-builder",
+    "package:dir": "npm run build && npm run package:stage && electron-builder --dir",
     "lint": "eslint .",
     "preview": "vite preview",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test": "npm run build && npm run test:e2e"
-  },
-  "dependencies": {
-    "react": "^19.2.6",
-    "react-dom": "^19.2.6"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -44,6 +41,8 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.6.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
     "vite": "^8.0.12",

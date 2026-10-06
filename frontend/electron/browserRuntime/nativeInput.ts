@@ -44,11 +44,40 @@ const NAMED_KEYS: Record<string, KeyDefinition> = {
 }
 
 /**
- * Best-effort key code for a printable character. Letters and digits map to
- * their standard US-layout codes; anything else reports 0, which pages
- * overwhelmingly ignore in favour of `key`/`text`.
+ * US-layout physical keys for punctuation, shifted and unshifted. Chip and
+ * token widgets (mail recipient fields, tag inputs) commonly decide on
+ * `keyCode` whether a comma or semicolon ends an entry, so reporting 0 for
+ * them silently disables that behaviour.
+ */
+const PUNCTUATION_KEYS: Record<string, { code: string; keyCode: number }> = {
+  ' ': { code: 'Space', keyCode: 32 },
+  ',': { code: 'Comma', keyCode: 188 }, '<': { code: 'Comma', keyCode: 188 },
+  '.': { code: 'Period', keyCode: 190 }, '>': { code: 'Period', keyCode: 190 },
+  ';': { code: 'Semicolon', keyCode: 186 }, ':': { code: 'Semicolon', keyCode: 186 },
+  '/': { code: 'Slash', keyCode: 191 }, '?': { code: 'Slash', keyCode: 191 },
+  '-': { code: 'Minus', keyCode: 189 }, '_': { code: 'Minus', keyCode: 189 },
+  '=': { code: 'Equal', keyCode: 187 }, '+': { code: 'Equal', keyCode: 187 },
+  "'": { code: 'Quote', keyCode: 222 }, '"': { code: 'Quote', keyCode: 222 },
+  '[': { code: 'BracketLeft', keyCode: 219 }, '{': { code: 'BracketLeft', keyCode: 219 },
+  ']': { code: 'BracketRight', keyCode: 221 }, '}': { code: 'BracketRight', keyCode: 221 },
+  '\\': { code: 'Backslash', keyCode: 220 }, '|': { code: 'Backslash', keyCode: 220 },
+  '`': { code: 'Backquote', keyCode: 192 }, '~': { code: 'Backquote', keyCode: 192 },
+  '!': { code: 'Digit1', keyCode: 49 }, '@': { code: 'Digit2', keyCode: 50 },
+  '#': { code: 'Digit3', keyCode: 51 }, '$': { code: 'Digit4', keyCode: 52 },
+  '%': { code: 'Digit5', keyCode: 53 }, '^': { code: 'Digit6', keyCode: 54 },
+  '&': { code: 'Digit7', keyCode: 55 }, '*': { code: 'Digit8', keyCode: 56 },
+  '(': { code: 'Digit9', keyCode: 57 }, ')': { code: 'Digit0', keyCode: 48 },
+}
+
+/**
+ * Best-effort key code for a printable character. Letters, digits and US
+ * punctuation map to their standard codes; anything else reports 0, which
+ * pages overwhelmingly ignore in favour of `key`/`text`.
  */
 function printableKeyDefinition(character: string): KeyDefinition {
+  const punctuation = PUNCTUATION_KEYS[character]
+  if (punctuation) return { key: character, code: punctuation.code, keyCode: punctuation.keyCode, text: character }
+
   const upper = character.toUpperCase()
   const isLetter = upper >= 'A' && upper <= 'Z'
   const isDigit = character >= '0' && character <= '9'

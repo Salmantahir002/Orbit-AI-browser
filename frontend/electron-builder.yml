@@ -12,10 +12,11 @@
 # Run with:  npm run package        (full NSIS installer)
 #            npm run package:dir    (unpacked app dir, for smoke testing)
 #
-# NOTE: `npm run build` compiles backend-node with its full dependency tree
-# (tsx / vitest / esbuild are devDependencies). For a lean installer, run
-# `npm ci --omit=dev` inside ../backend-node before `npm run package` so only
-# fastify/pino/cheerio/@sinclair/typebox/dotenv are copied.
+# Both run `npm run package:stage` first (scripts/stage-backend.mjs), which
+# builds build/backend: the compiled server plus only its production
+# dependencies and this platform's onnxruntime-node binary. That is what gets
+# shipped; the dev tooling and other OSes' native binaries in
+# backend-node/node_modules are not.
 
 appId: com.orbit.browser
 productName: Orbit
@@ -27,14 +28,18 @@ directories:
 files:
   - dist/**/*
   - dist-electron/**/*
+  - "!**/*.d.ts"
+  - "!**/*.tsbuildinfo"
   - package.json
 
+# node_modules is its own entry on purpose: electron-builder skips a node_modules folder found
+# *inside* an extraResources directory, so `from: build/backend` alone would ship no dependencies.
 extraResources:
-  - from: ../backend-node/dist
+  - from: build/backend/dist
     to: backend/dist
-  - from: ../backend-node/node_modules
+  - from: build/backend/node_modules
     to: backend/node_modules
-  - from: ../backend-node/package.json
+  - from: build/backend/package.json
     to: backend/package.json
 
 asar: true

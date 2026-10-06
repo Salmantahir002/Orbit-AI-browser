@@ -27,7 +27,7 @@ import type { ViewportPoint } from './elementResolver.js'
  * one that accepted it.
  */
 
-/** Cursor travel time. The TS side waits this out so the motion is actually seen. */
+/** Cosmetic travel duration; native input never waits for this animation. */
 const MOVE_MS = 420
 /** Press + ripple duration for a click. */
 const CLICK_MS = 420
@@ -35,11 +35,6 @@ const CLICK_MS = 420
 const BREATHE_MS = 2600
 
 const ACCENT = '#2f7bff'
-
-/** Pause after handing an animation to the page, so it plays before the next step. */
-function hold(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
 
 /** Guards against a NaN/Infinity coordinate reaching the injected script. */
 function coord(value: number): number {
@@ -339,28 +334,22 @@ export async function parkVirtualCursor(session: CdpSession, point: ViewportPoin
   await evaluate(session, `window.__pgAgentOverlay.park(${coord(point.x)}, ${coord(point.y)})`)
 }
 
-/** Glides the cursor to a point, then waits for the travel to finish. */
+/** Starts the glide; the page animates while native input proceeds. */
 export async function moveVirtualCursor(session: CdpSession, point: ViewportPoint, label = ''): Promise<void> {
   await evaluate(session, `window.__pgAgentOverlay.moveTo(${coord(point.x)}, ${coord(point.y)}, ${jsString(label)})`)
-  await hold(MOVE_MS)
 }
 
-/** Plays the click animation and lets it land before the real click is dispatched. */
+/** Starts the click animation without adding an artificial input delay. */
 export async function pulseVirtualCursorClick(session: CdpSession, point: ViewportPoint): Promise<void> {
   await evaluate(session, `window.__pgAgentOverlay.clickAt(${coord(point.x)}, ${coord(point.y)})`)
-  // Only part of the ripple is awaited: the real click should land while the
-  // animation is still playing, not after it has finished.
-  await hold(Math.round(CLICK_MS * 0.55))
 }
 
 /** Moves to the scroll point and bobs the cursor in the scroll direction. */
 export async function pulseVirtualCursorScroll(session: CdpSession, point: ViewportPoint, deltaY = 0): Promise<void> {
   await evaluate(session, `window.__pgAgentOverlay.nudge(${coord(point.x)}, ${coord(point.y)}, ${coord(deltaY)})`)
-  await hold(MOVE_MS)
 }
 
 /** Bumps the cursor in place for keyboard actions, which have no click point. */
 export async function pulseVirtualCursorTyping(session: CdpSession, label = 'type'): Promise<void> {
   await evaluate(session, `window.__pgAgentOverlay.pulse(${jsString(label)})`)
-  await hold(240)
 }

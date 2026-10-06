@@ -133,6 +133,20 @@ export type VerifyOptions = {
   expectation: VerificationExpectation
   /** For fill/type: the text that should now be present in the field. */
   expectedValue?: string
+  /**
+   * For fill: whether the focused field held the typed text straight after
+   * typing, as read by the field probe. `null`/absent means the probe could
+   * not tell (cross-origin frame, date input, custom widget), and the
+   * accessibility-tree signals decide alone.
+   */
+  typedLanded?: boolean | null
+  /** For fill: what the focused field held when `typedLanded` is false. */
+  fieldText?: string
+}
+
+function quoteFieldText(value: string): string {
+  const compact = value.replace(/\s+/g, ' ').trim()
+  return compact.length > 80 ? `"${compact.slice(0, 80)}…"` : `"${compact}"`
 }
 
 export function verifyAction(
@@ -162,10 +176,24 @@ export function verifyAction(
       reason = verified ? `Navigated to ${after.url}` : 'The url did not change'
       break
     case 'value':
-      verified = valueMatchesExpectation || structureChanged
-      reason = verified
-        ? (valueMatchesExpectation ? 'The field holds the expected value' : 'The field did not update, but the page changed')
-        : 'The field value did not change'
+      // A structural change on its own proves nothing for a fill: typing into
+      // an autocomplete field opens a suggestion popup whether or not the text
+      // reached the field. When the probe saw the field, its answer wins.
+      if (valueMatchesExpectation) {
+        verified = true
+        reason = 'The field holds the expected value'
+      } else if (options.typedLanded === false) {
+        verified = false
+        reason = options.fieldText === undefined
+          ? 'The text did not reach the field: no text field had keyboard focus while typing'
+          : `The text did not reach the field: after typing, the focused field holds ${quoteFieldText(options.fieldText)}`
+      } else if (options.typedLanded === true) {
+        verified = true
+        reason = 'The field received the typed text'
+      } else {
+        verified = structureChanged
+        reason = verified ? 'The field did not update, but the page changed' : 'The field value did not change'
+      }
       break
     case 'scroll':
       verified = scrollChanged || structureChanged

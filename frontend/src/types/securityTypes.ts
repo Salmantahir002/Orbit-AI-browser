@@ -14,20 +14,6 @@ export type SecurityCheckResponse = {
   analysis_details: AnalysisDetails
 }
 
-export type SecurityEvent = {
-  allowed: boolean
-  label: SecurityLabel
-  source: SecuritySource
-  summary_reason: string
-  timestamp: string
-}
-
-export type HealthResponse = {
-  status: string
-  version: string
-  model_loaded: boolean
-}
-
 export type LlmResponse = {
   response: string
   model: string

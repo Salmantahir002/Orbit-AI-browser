@@ -30,6 +30,85 @@ const TEST_PAGE = `data:text/html,${encodeURIComponent(`
   <a href="#bottom" id="bottom-link">Bottom link</a>
 </body></html>`)}`
 
+/**
+ * A mail composer shaped like Gmail's: recipient rows that keep their chips
+ * next to the input, an autocomplete popup that changes the page structure on
+ * every keystroke, Gmail's habit of turning the last chip back into text when
+ * Backspace hits an empty input, a Cc row that only splits on a real comma
+ * key, a "click to edit" proxy that focuses a different element than the one
+ * clicked, and a field that swallows input.
+ */
+const COMPOSE_PAGE = `data:text/html,${encodeURIComponent(`
+<!doctype html><html><body style="font-family:sans-serif;padding:20px">
+  <h1>Compose Test Page</h1>
+  <div class="row">
+    <span>To</span>
+    <div class="chips" id="to-chips" role="listbox" aria-label="To list"></div>
+    <input id="to" role="combobox" aria-label="To recipients" aria-autocomplete="list" aria-expanded="false" aria-controls="suggest" />
+    <div id="suggest" role="listbox" aria-label="Suggestions" hidden></div>
+  </div>
+  <div class="row">
+    <span>Cc</span>
+    <div class="chips" id="cc-chips" role="listbox" aria-label="Cc list"></div>
+    <input id="cc" role="combobox" aria-label="Cc recipients" />
+  </div>
+  <input id="subject" aria-label="Subject" />
+  <div id="note-proxy" role="textbox" tabindex="0" aria-label="Add a note">Add a note</div>
+  <textarea id="note" aria-label="Note text" style="display:none"></textarea>
+  <input id="locked" aria-label="Locked field" />
+  <div id="locked-popup" role="listbox" aria-label="Locked suggestions" hidden><div role="option">Suggestion</div></div>
+  <script>
+    function addChip(list, address) {
+      const chip = document.createElement('div');
+      chip.setAttribute('role', 'option');
+      chip.setAttribute('data-hovercard-id', address);
+      chip.className = 'chip';
+      chip.textContent = address;
+      list.appendChild(chip);
+    }
+
+    function chipField(input, list, splitsOn) {
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Backspace' && input.value === '' && list.lastElementChild) {
+          event.preventDefault();
+          input.value = list.lastElementChild.textContent;
+          list.lastElementChild.remove();
+          return;
+        }
+        if (!splitsOn(event) || !input.value.trim()) return;
+        event.preventDefault();
+        addChip(list, input.value.replace(/,/g, '').trim());
+        input.value = '';
+        input.dispatchEvent(new Event('input'));
+      });
+    }
+
+    const to = document.getElementById('to');
+    const suggest = document.getElementById('suggest');
+    to.addEventListener('input', () => {
+      suggest.hidden = !to.value;
+      to.setAttribute('aria-expanded', String(!!to.value));
+      suggest.innerHTML = to.value ? '<div role="option">' + to.value.replace(/</g, '') + '</div>' : '';
+    });
+    chipField(to, document.getElementById('to-chips'), (event) => event.key === 'Enter');
+    chipField(document.getElementById('cc'), document.getElementById('cc-chips'), (event) => event.keyCode === 188);
+
+    const proxy = document.getElementById('note-proxy');
+    const note = document.getElementById('note');
+    proxy.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      note.style.display = 'block';
+      note.focus();
+    });
+
+    const locked = document.getElementById('locked');
+    locked.addEventListener('keydown', (event) => {
+      event.preventDefault();
+      document.getElementById('locked-popup').hidden = false;
+    });
+  </script>
+</body></html>`)}`
+
 type RuntimeResult<T> = { ok: true; data: T } | { ok: false; error: { code: string; message: string } }
 
 test.describe('Browser Runtime over real CDP', () => {
@@ -64,22 +143,22 @@ test.describe('Browser Runtime over real CDP', () => {
     })
   }
 
-  /** Loads the fixture page into the active tab and returns its runtime target id. */
-  async function loadTestPage(): Promise<number> {
+  /** Loads a fixture page into the active tab and returns its runtime target id. */
+  async function loadTestPage(page = TEST_PAGE): Promise<number> {
     const targetId = await activeTargetId()
     await window.evaluate(
       ([id, url]) => window.electronAPI!.browser.navigate(id as number, url as string),
-      [targetId, TEST_PAGE] as const,
+      [targetId, page] as const,
     )
 
     // Wait for the runtime to report the page, rather than sleeping.
     await expect.poll(async () => {
-      return await window.evaluate(async (id) => {
+      return await window.evaluate(async ([id, url]) => {
         const described = await window.electronAPI!.runtimeInvoke({
           targetId: id, name: 'describeTarget', params: {},
         }) as RuntimeResult<{ url: string }>
-        return described.ok && described.data.url.startsWith('data:') ? id : null
-      }, targetId)
+        return described.ok && described.data.url === url ? id : null
+      }, [targetId, page] as const)
     }, { timeout: 20000 }).not.toBeNull()
 
     return targetId
@@ -131,8 +210,8 @@ test.describe('Browser Runtime over real CDP', () => {
     expect(filled.data.verification.verified, filled.data.verification.reason).toBe(true)
 
     // And the page really received it, not just the accessibility layer.
-    const value = await window.evaluate(
-      (id) => window.electronAPI!.browser.executeJavaScript(id, 'document.getElementById("q").value'),
+    const value = await app.evaluate(
+      ({ webContents }, id) => webContents.fromId(id)!.executeJavaScript('document.getElementById("q").value'),
       targetId,
     )
     expect(value).toBe('hello agent')
@@ -155,8 +234,8 @@ test.describe('Browser Runtime over real CDP', () => {
     expect(clicked.ok).toBe(true)
 
     // The click must have run the page's own onclick handler.
-    const output = await window.evaluate(
-      (id) => window.electronAPI!.browser.executeJavaScript(id, 'document.getElementById("out").textContent'),
+    const output = await app.evaluate(
+      ({ webContents }, id) => webContents.fromId(id)!.executeJavaScript('document.getElementById("out").textContent'),
       targetId,
     )
     expect(output).toBe('clicked:shoes')
@@ -197,6 +276,123 @@ test.describe('Browser Runtime over real CDP', () => {
     expect(blocked.ok).toBe(false)
     if (blocked.ok) return
     expect(blocked.error.code).toBe('NAVIGATION_BLOCKED')
+  })
+
+  type FillResult = { verification: { verified: boolean; reason: string } }
+  type StateElements = { elements: { id: string; role: string; name: string }[] }
+
+  async function composeElement(targetId: number, name: string): Promise<string> {
+    const state = await invoke<StateElements>(targetId, 'extractPageState')
+    expect(state.ok).toBe(true)
+    if (!state.ok) throw new Error('state extraction failed')
+    const element = state.data.elements.find((candidate) => candidate.name === name)
+    expect(element, `no "${name}" element in semantic state`).toBeTruthy()
+    return element!.id
+  }
+
+  async function pageValue(targetId: number, expression: string): Promise<unknown> {
+    return await app.evaluate(
+      ({ webContents }, [id, script]) => webContents.fromId(id as number)!.executeJavaScript(script as string),
+      [targetId, expression] as const,
+    )
+  }
+
+  test('fill commits an email address in a recipient token field as a chip', async () => {
+    const targetId = await loadTestPage(COMPOSE_PAGE)
+    const to = await composeElement(targetId, 'To recipients')
+
+    const filled = await invoke<FillResult>(targetId, 'fill', { elementId: to, value: 'salmantahir610@gmail.com' })
+    expect(filled.ok).toBe(true)
+    if (!filled.ok) return
+    expect(filled.data.verification.verified, filled.data.verification.reason).toBe(true)
+    expect(filled.data.verification.reason).toContain('Added salmantahir610@gmail.com as a recipient')
+
+    const chips = await pageValue(targetId, '[...document.querySelectorAll("#to-chips .chip")].map((chip) => chip.textContent)')
+    expect(chips).toEqual(['salmantahir610@gmail.com'])
+    expect(await pageValue(targetId, 'document.getElementById("to").value')).toBe('')
+  })
+
+  test('fill commits every address in a recipient list', async () => {
+    const targetId = await loadTestPage(COMPOSE_PAGE)
+    const to = await composeElement(targetId, 'To recipients')
+
+    const filled = await invoke<FillResult>(targetId, 'fill', { elementId: to, value: 'a@example.com, b@example.org' })
+    expect(filled.ok).toBe(true)
+    if (!filled.ok) return
+    expect(filled.data.verification.verified, filled.data.verification.reason).toBe(true)
+
+    const chips = await pageValue(targetId, '[...document.querySelectorAll("#to-chips .chip")].map((chip) => chip.textContent)')
+    expect(chips).toEqual(['a@example.com', 'b@example.org'])
+  })
+
+  test('re-filling a recipient that is already a chip does not add it twice', async () => {
+    const targetId = await loadTestPage(COMPOSE_PAGE)
+    const first = await invoke<FillResult>(targetId, 'fill', {
+      elementId: await composeElement(targetId, 'To recipients'), value: 'salmantahir610@gmail.com',
+    })
+    expect(first.ok).toBe(true)
+
+    // The planner cannot see the chip as a field value, so it retries.
+    const second = await invoke<FillResult>(targetId, 'fill', {
+      elementId: await composeElement(targetId, 'To recipients'), value: 'salmantahir610@gmail.com',
+    })
+    expect(second.ok).toBe(true)
+    if (!second.ok) return
+    expect(second.data.verification.verified, second.data.verification.reason).toBe(true)
+    expect(second.data.verification.reason).toContain('already a recipient')
+
+    const chips = await pageValue(targetId, '[...document.querySelectorAll("#to-chips .chip")].map((chip) => chip.textContent)')
+    expect(chips).toEqual(['salmantahir610@gmail.com'])
+    expect(await pageValue(targetId, 'document.getElementById("to").value')).toBe('')
+  })
+
+  test('falls back to a comma when the recipient field ignores Enter', async () => {
+    const targetId = await loadTestPage(COMPOSE_PAGE)
+    const filled = await invoke<FillResult>(targetId, 'fill', {
+      elementId: await composeElement(targetId, 'Cc recipients'), value: 'mentor@example.com',
+    })
+    expect(filled.ok).toBe(true)
+    if (!filled.ok) return
+    expect(filled.data.verification.verified, filled.data.verification.reason).toBe(true)
+    expect(filled.data.verification.reason).toContain('Added mentor@example.com as a recipient')
+
+    const chips = await pageValue(targetId, '[...document.querySelectorAll("#cc-chips .chip")].map((chip) => chip.textContent)')
+    expect(chips).toEqual(['mentor@example.com'])
+    expect(await pageValue(targetId, 'document.getElementById("cc").value')).toBe('')
+  })
+
+  test('fill does not press Enter in an ordinary field', async () => {
+    const targetId = await loadTestPage(COMPOSE_PAGE)
+    const subject = await composeElement(targetId, 'Subject')
+
+    const filled = await invoke<FillResult>(targetId, 'fill', { elementId: subject, value: 'Week 4 progress' })
+    expect(filled.ok).toBe(true)
+    if (!filled.ok) return
+    expect(filled.data.verification.verified, filled.data.verification.reason).toBe(true)
+    expect(await pageValue(targetId, 'document.getElementById("subject").value')).toBe('Week 4 progress')
+    expect(await pageValue(targetId, 'document.querySelectorAll(".chip").length')).toBe(0)
+  })
+
+  test('fill keeps the focus a click-to-edit proxy hands to its real field', async () => {
+    const targetId = await loadTestPage(COMPOSE_PAGE)
+    const proxy = await composeElement(targetId, 'Add a note')
+
+    const filled = await invoke<FillResult>(targetId, 'fill', { elementId: proxy, value: 'remember the slides' })
+    expect(filled.ok).toBe(true)
+    if (!filled.ok) return
+    expect(filled.data.verification.verified, filled.data.verification.reason).toBe(true)
+    expect(await pageValue(targetId, 'document.getElementById("note").value')).toBe('remember the slides')
+  })
+
+  test('fill reports failure when the text never reaches the field, even though the page changed', async () => {
+    const targetId = await loadTestPage(COMPOSE_PAGE)
+    const locked = await composeElement(targetId, 'Locked field')
+
+    const filled = await invoke<FillResult>(targetId, 'fill', { elementId: locked, value: 'should not land' })
+    expect(filled.ok).toBe(true)
+    if (!filled.ok) return
+    expect(filled.data.verification.verified).toBe(false)
+    expect(filled.data.verification.reason).toContain('did not reach the field')
   })
 
   test('reports a stale element id rather than clicking the wrong node', async () => {

@@ -1,0 +1,52 @@
+.agent-mode .agent-activity {
+  flex: 0 0 auto;
+  margin: 8px 14px 0;
+  border: 1px solid rgba(172, 195, 209, .16);
+  border-radius: 12px;
+  background: rgba(172, 195, 209, .04);
+  overflow: hidden;
+}
+
+.agent-mode .agent-timeline { min-height: 0; }
+.agent-mode .agent-timeline > * { flex-shrink: 0; }
+.agent-mode .agent-goal-form { flex-shrink: 0; }
+
+.agent-mode .agent-activity-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 12px;
+  border: 0;
+  background: transparent;
+  color: #e5e9ed;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agent-mode .agent-activity-toggle:hover { background: rgba(172, 195, 209, .06); }
+.agent-mode .agent-activity-toggle:focus-visible { outline: 2px solid #a8c7fa; outline-offset: -3px; }
+.agent-activity-copy { flex: 1; min-width: 0; }
+.agent-activity-label { display: block; font-size: 13px; font-weight: 600; }
+.agent-activity-status { display: block; margin-top: 4px; color: #adb8c2; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.agent-activity-chevron { flex: none; transition: transform 180ms ease; }
+.agent-activity-toggle[aria-expanded="true"] .agent-activity-chevron { transform: rotate(90deg); }
+.agent-activity-orbit { flex: none; display: flex; align-items: center; justify-content: center; gap: 3px; width: 22px; height: 24px; }
+.agent-activity-orbit > span { width: 4px; height: 14px; border-radius: 3px; background: #a8c7fa; transform: scaleY(.45); }
+.agent-activity--active .agent-activity-orbit > span { animation: agent-activity-wave 1.1s ease-in-out infinite; }
+.agent-activity--active .agent-activity-orbit > span:nth-child(2) { animation-delay: 140ms; }
+.agent-activity--active .agent-activity-orbit > span:nth-child(3) { animation-delay: 280ms; }
+.agent-activity--active .agent-activity-label { animation: agent-label-breathe 2.4s ease-in-out infinite; }
+.agent-activity-detail { max-height: 160px; overflow-y: auto; padding: 0 14px 14px 44px; color: #c9d2da; font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
+.agent-activity-detail p { margin: 5px 0 0; white-space: pre-wrap; }
+.agent-activity-caption { color: #9aa8b5; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.agent-mode .agent-step-tool { white-space: normal; overflow-wrap: anywhere; }
+@keyframes agent-activity-wave { 0%, 100% { transform: scaleY(.4); opacity: .55; } 50% { transform: scaleY(1); opacity: 1; } }
+@keyframes agent-label-breathe { 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) {
+  .agent-activity--active .agent-activity-orbit > span,
+  .agent-activity--active .agent-activity-label { animation: none; }
+  .agent-activity-chevron { transition: none; }
+}

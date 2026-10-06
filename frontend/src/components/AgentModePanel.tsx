@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, useId, type FormEvent } from 'react'
 import { AgentTask } from '../services/agentRuntimeCore'
 import type { ApprovalRequest } from '../services/agentApprovalPolicy'
-import type { AgentTaskResult, AgentToolCall } from '../types/agentTypes'
+import type { AgentTaskResult } from '../types/agentTypes'
 import { PromptModelPicker } from './PromptModelPicker'
-import { MarkdownMessage } from './MarkdownMessage'
+import { AgentResultMessage } from './AgentResultMessage'
+import { describeAgentActivity } from '../services/agentActivity'
+import './AgentActivity.css'
 
 type StepEntry = {
   id: string
@@ -24,20 +26,16 @@ type AgentModePanelProps = {
   onOpenSettings?: () => void
 }
 
-function describeArguments(toolCall: AgentToolCall): string {
-  const args = toolCall.arguments ?? {}
-  return ['target', 'url', 'value', 'text', 'key', 'note', 'summary']
-    .filter((name) => typeof args[name] === 'string' && args[name])
-    .map((name) => String(args[name]).slice(0, 80))
-    .join(' · ')
-}
-
 export function AgentModePanel({ targetId, currentUrl, onOpenTab, onOpenSettings }: AgentModePanelProps) {
   const [goal, setGoal] = useState('')
   const [activeGoal, setActiveGoal] = useState('')
   const [isRunning, setIsRunning] = useState(false)
   const [steps, setSteps] = useState<StepEntry[]>([])
   const [status, setStatus] = useState('')
+  const [isPlanning, setIsPlanning] = useState(false)
+  const [planSummary, setPlanSummary] = useState('')
+  const [showPlan, setShowPlan] = useState(false)
+  const planDetailsId = useId()
   const [result, setResult] = useState<AgentTaskResult | null>(null)
   const [approval, setApproval] = useState<ApprovalRequest | null>(null)
   const [showResultPopup, setShowResultPopup] = useState(false)
@@ -95,6 +93,9 @@ export function AgentModePanel({ targetId, currentUrl, onOpenTab, onOpenSettings
     abortRef.current = controller
 
     setIsRunning(true)
+    setIsPlanning(true)
+    setPlanSummary('')
+    setShowPlan(false)
     setSteps([])
     setResult(null)
     setShowResultPopup(false)
@@ -111,15 +112,17 @@ export function AgentModePanel({ targetId, currentUrl, onOpenTab, onOpenSettings
       onApprovalRequest: handleApprovalRequest,
       onOpenTab,
       events: {
+        onPlanning: () => setIsPlanning(true),
+        onPlan: (summary) => { setPlanSummary(summary); setIsPlanning(false) },
+        onAction: (toolCall) => { setIsPlanning(false); setStatus(describeAgentActivity(toolCall)) },
         onStatus: (message) => setStatus(message),
-        onStep: (step, toolCall) => {
+        onStep: (step, toolCall, activity) => {
           setSteps((previous) => [...previous, {
             id: `${step}-${toolCall.tool}-${previous.length}`,
             step,
-            tool: toolCall.tool,
-            detail: describeArguments(toolCall),
+            tool: activity.summary,
+            detail: activity.detail === activity.summary ? '' : activity.detail,
           }])
-          setStatus(`Running ${toolCall.tool}…`)
         },
       },
     })
@@ -135,6 +138,7 @@ export function AgentModePanel({ targetId, currentUrl, onOpenTab, onOpenSettings
       })
     } finally {
       setIsRunning(false)
+      setIsPlanning(false)
       setStatus('')
       abortRef.current = null
     }
@@ -143,6 +147,7 @@ export function AgentModePanel({ targetId, currentUrl, onOpenTab, onOpenSettings
   function handleStop() {
     abortRef.current?.abort()
     approvalResolverRef.current?.(false)
+    setIsPlanning(false)
     setStatus('Stopping…')
   }
 
@@ -177,13 +182,6 @@ export function AgentModePanel({ targetId, currentUrl, onOpenTab, onOpenSettings
             </div>
           ))}
 
-          {isRunning && status ? (
-            <div className="agent-status">
-              {status}
-              <div className="dot-pulse"><span /><span /><span /></div>
-            </div>
-          ) : null}
-
           {result ? (
             <div
               className={`agent-result ${resultTone} agent-result--clickable`}
@@ -212,7 +210,7 @@ export function AgentModePanel({ targetId, currentUrl, onOpenTab, onOpenSettings
                   </svg>
                 </span>
               </div>
-              <p>{result.message}</p>
+              <AgentResultMessage text={result.message} />
               <span className="agent-result-steps">
                 {result.steps} step{result.steps === 1 ? '' : 's'} · Tap to expand
               </span>
@@ -222,6 +220,35 @@ export function AgentModePanel({ targetId, currentUrl, onOpenTab, onOpenSettings
           <div ref={stepsEndRef} />
         </div>
       )}
+
+      {/* Outside the scrolling history: activity must remain visible during long tasks. */}
+      {isRunning || planSummary ? (
+        <div className={`agent-activity${isRunning && !approval && status !== 'Stopping…' ? ' agent-activity--active' : ''}`}>
+          <button
+            type="button"
+            className="agent-activity-toggle"
+            aria-expanded={showPlan}
+            aria-controls={planDetailsId}
+            onClick={() => setShowPlan(previous => !previous)}
+          >
+            <span className="agent-activity-orbit" aria-hidden="true"><span /><span /><span /></span>
+            <span className="agent-activity-copy">
+              <span className="agent-activity-label">{!isRunning ? 'Planning summary' : approval ? 'Waiting for approval' : status === 'Stopping…' ? 'Stopping' : isPlanning ? 'Thinking' : 'Working'}</span>
+              <span className="agent-activity-status" role="status" aria-live="polite">
+                {isRunning ? (approval ? approval.summary : status) : 'View the latest action plan'}
+              </span>
+            </span>
+            <svg className="agent-activity-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path d="m9 5 7 7-7 7" />
+            </svg>
+          </button>
+          <div id={planDetailsId} className="agent-activity-detail" hidden={!showPlan}>
+            <span className="agent-activity-caption">{isPlanning ? 'Latest plan · updating' : 'Action summary'}</span>
+            <p>{planSummary || 'Reviewing the current page. The next-action summary will appear here when the plan is ready.'}</p>
+          </div>
+        </div>
+      ) : null}
+
 
       {approval ? (
         <div className="agent-approval" role="alertdialog" aria-label="Approval required">
@@ -328,7 +355,7 @@ export function AgentModePanel({ targetId, currentUrl, onOpenTab, onOpenSettings
               </button>
             </div>
             <div className="agent-result-modal-body">
-              <MarkdownMessage text={result.message} className="agent-result-modal-markdown" />
+              <AgentResultMessage text={result.message} expanded />
             </div>
             <div className="agent-result-modal-footer">
               <span className="agent-result-modal-hint">Tap anywhere outside to close</span>

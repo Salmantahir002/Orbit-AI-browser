@@ -10,16 +10,6 @@ export interface ModelInfo {
   description?: string
 }
 
-export interface ProviderPreset {
-  id: string
-  name: string
-  provider_type: ProviderApiType
-  base_url: string
-  is_custom: boolean
-  requires_base_url: boolean
-  description: string
-}
-
 export interface ClientProviderConfig {
   id: string
   name: string

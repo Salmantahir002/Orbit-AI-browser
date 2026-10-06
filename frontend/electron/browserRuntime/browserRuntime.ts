@@ -1,5 +1,16 @@
+import { evaluatePage, elementBounds, dispatchMouse, drag, extractVirtualTable, type EvaluateParams, type BoundsParams, type MouseParams, type DragParams, type VirtualTableParams } from './advancedBrowser.js'
 import type { CdpSession } from './cdpSession.js'
 import { focusElement, resolveElementPoint, readViewportSize } from './elementResolver.js'
+import {
+  fieldHoldsText,
+  hasRecipient,
+  isRecipientField,
+  parseEmailList,
+  probeFocusedField,
+  probeRecipientField,
+  type FocusedField,
+  type RecipientField,
+} from './fieldProbe.js'
 import {
   clearFocusedField,
   dispatchNativeClick,
@@ -58,6 +69,41 @@ const ALLOWED_NAVIGATION_SCHEMES = new Set(['http:', 'https:', 'about:'])
 
 const DEFAULT_SCROLL_DELTA = 400
 
+/** What typing into a field achieved, as the field probe saw it. */
+type FieldEntry = {
+  /** True/false when the probe could read the field; null when it could not tell. */
+  landed: boolean | null
+  /** What the focused field held instead, when the text did not land. */
+  fieldText?: string
+  /** Replaces the generic verification reason when the entry succeeded. */
+  reason?: string
+}
+
+/**
+ * One line per recipient-field step in the main-process log, so a field that
+ * misbehaves on a real site can be diagnosed from the terminal. Only the
+ * field's own raw text and a yes/no for the address are logged, never the
+ * surrounding page.
+ */
+function logRecipientStep(step: string, field: RecipientField | null, address?: string): void {
+  console.info('[browser-runtime] recipient field', JSON.stringify({
+    step,
+    address,
+    found: field !== null,
+    isInput: field?.isInput,
+    fieldText: field?.fieldText.slice(0, 120),
+    addressIsChip: field && address ? hasRecipient(field, address) : undefined,
+  }))
+}
+
+function landedIn(focused: FocusedField, expected: string): FieldEntry {
+  if (focused.state === 'none') return { landed: false }
+  if (focused.state !== 'editable') return { landed: null }
+  return fieldHoldsText(focused.text, expected)
+    ? { landed: true }
+    : { landed: false, fieldText: focused.text }
+}
+
 /**
  * The single gateway through which every agent-driven browser action passes.
  *
@@ -66,7 +112,7 @@ const DEFAULT_SCROLL_DELTA = 400
  *    phases can gate, verify, and recover from actions in one place.
  *  - The runtime is independent of the LLM: it knows nothing about planners,
  *    goals, or prompts.
- *  - Interaction happens over CDP native input, never by injecting scripts.
+ *  - Native input and bounded guest-page evaluation share this gateway.
  *
  * Phases 1–3 implement the lifecycle, the inspection layer, and the action
  * layer. File upload is deliberately withheld until the Phase 7 approval
@@ -189,6 +235,11 @@ export class BrowserRuntime {
 
   private dispatch(session: CdpSession, name: RuntimeCommandName, params: object): Promise<unknown> {
     switch (name) {
+      case 'evaluate': return evaluatePage(session, params as EvaluateParams)
+      case 'elementBounds': return elementBounds(session, params as BoundsParams)
+      case 'dispatchMouseEvent': return dispatchMouse(session, params as MouseParams)
+      case 'drag': return drag(session, params as DragParams)
+      case 'extractVirtualTable': return extractVirtualTable(session, params as VirtualTableParams)
       case 'describeTarget':
         return this.describeTarget(session)
       case 'extractPageState':
@@ -366,7 +417,14 @@ export class BrowserRuntime {
 
   /**
    * Focuses the field, clears it with a real select-all + delete, then types.
-   * The existing value is never assigned or read back through script.
+   * The value is never assigned through script; the field probe only reads
+   * where focus went and what the field holds, so a fill is judged by whether
+   * the text actually landed rather than by "something on the page changed".
+   *
+   * Recipient fields (mail To/Cc/Bcc, invite guests) hold addresses as chips,
+   * and a typed address that is still raw text is not a recipient. Each
+   * address is therefore committed with Enter once the suggestion list has
+   * caught up with it.
    */
   private async fill(session: CdpSession, params: FillParams): Promise<ActionAck> {
     if (typeof params.value !== 'string') {
@@ -379,19 +437,183 @@ export class BrowserRuntime {
     const point = await resolveElementPoint(session, handle)
     await moveVirtualCursor(session, point, handle.name || 'fill')
 
-    return this.withVerification(
-      session,
-      'value',
-      async () => {
-        await pulseVirtualCursorClick(session, point)
-        await dispatchNativeClick(session, point)
-        await focusElement(session, handle).catch(() => undefined)
-        await clearFocusedField(session)
-        await pulseVirtualCursorTyping(session, `type "${params.value.slice(0, 40)}"`)
-        await dispatchNativeType(session, params.value, params.delayMs ?? 0)
-      },
-      { backendNodeId: handle.backendNodeId, expectedValue: params.value },
-    )
+    const before = await captureActionSignature(session, handle.backendNodeId)
+    const delayMs = params.delayMs ?? 0
+
+    await pulseVirtualCursorClick(session, point)
+    await dispatchNativeClick(session, point)
+    await this.focusFieldForTyping(session, handle)
+
+    const recipients = isRecipientField(handle) ? parseEmailList(params.value) : null
+    let entry: FieldEntry
+    if (recipients) {
+      // No select-all + Backspace here: in a chip field, Backspace on an empty
+      // input reopens or deletes the last chip, which is how a retried fill
+      // left the same address in the field twice.
+      await pulseVirtualCursorTyping(session, `type "${params.value.slice(0, 40)}"`)
+      entry = await this.enterRecipients(session, handle, recipients, delayMs)
+    } else {
+      await clearFocusedField(session)
+      await pulseVirtualCursorTyping(session, `type "${params.value.slice(0, 40)}"`)
+      entry = await this.enterText(session, handle, params.value, delayMs)
+    }
+
+    const settledNodes = await settleAfterAction(session)
+    const after = await captureActionSignature(session, handle.backendNodeId, settledNodes)
+    const verification = verifyAction(before, after, {
+      expectation: 'value',
+      expectedValue: params.value,
+      typedLanded: entry.landed,
+      fieldText: entry.fieldText,
+    })
+
+    return this.ack(verification.verified && entry.reason ? { ...verification, reason: entry.reason } : verification)
+  }
+
+  /**
+   * Keeps the focus the click produced when it is usable, and only falls back
+   * to `DOM.focus` when it is not. Re-focusing unconditionally broke "click to
+   * edit" proxies such as Gmail's collapsed "Recipients" row: the click
+   * focuses the real input, and focusing the proxy afterwards pulled focus
+   * back off it, so every keystroke went nowhere.
+   */
+  private async focusFieldForTyping(session: CdpSession, handle: ElementHandle): Promise<void> {
+    const { focused, targetEditable } = await probeFocusedField(session, handle)
+    if (focused.state === 'opaque') return
+
+    if (focused.state === 'editable' || focused.state === 'unverifiable') {
+      // A different field took focus. That is right when the target is only a
+      // proxy for it, and a mis-aimed click when the target is a field itself.
+      if (focused.relatedToTarget || targetEditable !== true) return
+    }
+
+    await focusElement(session, handle).catch(() => undefined)
+  }
+
+  private async enterText(
+    session: CdpSession,
+    handle: ElementHandle,
+    value: string,
+    delayMs: number,
+  ): Promise<FieldEntry> {
+    await dispatchNativeType(session, value, delayMs)
+    const { focused } = await probeFocusedField(session, handle)
+    return landedIn(focused, value)
+  }
+
+  /**
+   * Adds each address to a chip field without disturbing the chips already
+   * there. Filling is idempotent: an address that is already a recipient is
+   * skipped, so a planner that retries — because a chip never shows up in the
+   * accessibility tree as a field value — cannot add it twice.
+   */
+  private async enterRecipients(
+    session: CdpSession,
+    handle: ElementHandle,
+    addresses: string[],
+    delayMs: number,
+  ): Promise<FieldEntry> {
+    const added: string[] = []
+    const alreadyThere: string[] = []
+    const unconfirmed: string[] = []
+    const uncommitted: string[] = []
+
+    const initial = await probeRecipientField(session, handle)
+    if (!initial) return { landed: false }
+    logRecipientStep('start', initial)
+
+    // Leftover raw text from an earlier attempt is erased one character at a
+    // time from the end, which never reaches the chips before it. A
+    // contenteditable keeps its chips inside the text, so it is left alone.
+    if (initial.isInput && initial.fieldText.length > 0) {
+      await dispatchNativeKeyPress(session, 'End')
+      for (let index = 0; index < Math.min(initial.fieldText.length, 500); index += 1) {
+        await dispatchNativeKeyPress(session, 'Backspace')
+      }
+    }
+
+    for (const address of addresses) {
+      const current = await probeRecipientField(session, handle)
+      if (!current) return { landed: false }
+      if (hasRecipient(current, address) && !fieldHoldsText(current.fieldText, address)) {
+        alreadyThere.push(address)
+        continue
+      }
+
+      // An address that did not commit is still raw text in the field, so the
+      // next one needs a separator to stay a separate address.
+      await dispatchNativeType(session, uncommitted.length > 0 ? `, ${address}` : address, delayMs)
+
+      const typed = await probeRecipientField(session, handle)
+      logRecipientStep('typed', typed, address)
+      if (!typed || !fieldHoldsText(typed.fieldText, address)) {
+        return { landed: false, fieldText: typed?.fieldText }
+      }
+
+      // Let the suggestion list catch up with the whole address, so Enter
+      // commits this address rather than a suggestion for a prefix of it.
+      await settleAfterAction(session)
+      await dispatchNativeKeyPress(session, 'Enter')
+      let outcome = await this.recipientOutcome(session, handle, address, 'enter')
+
+      // Mail clients also split recipients on a comma; it is the fallback for
+      // a field whose Enter handling ignored the key.
+      if (outcome === 'pending') {
+        await dispatchNativeKeyPress(session, ',')
+        outcome = await this.recipientOutcome(session, handle, address, 'comma')
+        if (outcome === 'pending') {
+          // The comma did nothing either: take it back out of the raw text.
+          await dispatchNativeKeyPress(session, 'Backspace')
+        }
+      }
+
+      if (outcome === 'added') added.push(address)
+      else if (outcome === 'unconfirmed') unconfirmed.push(address)
+      else uncommitted.push(address)
+    }
+
+    const reasons: string[] = []
+    if (added.length > 0) {
+      reasons.push(`Added ${added.join(', ')} as ${added.length === 1 ? 'a recipient' : 'recipients'}`)
+    }
+    if (alreadyThere.length > 0) {
+      reasons.push(
+        `${alreadyThere.join(', ')} ${alreadyThere.length === 1 ? 'was' : 'were'} already a recipient, so nothing was typed again`,
+      )
+    }
+    if (unconfirmed.length > 0) {
+      reasons.push(
+        `the field accepted ${unconfirmed.join(', ')}, but no recipient with that exact address is shown — ` +
+          'a suggested contact may have been picked instead; check the To field before sending',
+      )
+    }
+    if (uncommitted.length > 0) {
+      reasons.push(
+        `typed ${uncommitted.join(', ')} into the recipient field, but it did not become a recipient chip — ` +
+          'select the matching suggestion before sending',
+      )
+    }
+
+    const reason = reasons.join('; ')
+    return { landed: true, reason: reason.charAt(0).toUpperCase() + reason.slice(1) }
+  }
+
+  /**
+   * `added`: the input let go of the address and a chip carries it.
+   * `unconfirmed`: the input let go of it, but no chip shows that address.
+   * `pending`: the address is still raw text in the input.
+   */
+  private async recipientOutcome(
+    session: CdpSession,
+    handle: ElementHandle,
+    address: string,
+    step: string,
+  ): Promise<'added' | 'unconfirmed' | 'pending'> {
+    const field = await probeRecipientField(session, handle)
+    logRecipientStep(step, field, address)
+    if (!field) return 'unconfirmed'
+    if (fieldHoldsText(field.fieldText, address)) return 'pending'
+    return hasRecipient(field, address) ? 'added' : 'unconfirmed'
   }
 
   private async type(session: CdpSession, params: TypeParams): Promise<ActionAck> {

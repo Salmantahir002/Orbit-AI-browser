@@ -7,86 +7,10 @@ import type {
   ClientProviderConfig,
   FetchModelsResult,
   ModelInfo,
-  ProviderPreset,
   TestConnectionResult,
 } from '../types/providerTypes'
 
 const API_BASE_URL = 'http://127.0.0.1:8000/api/v1'
-
-export const DEFAULT_PRESETS: ProviderPreset[] = [
-  {
-    id: 'opencode',
-    name: 'OpenCode Zen',
-    provider_type: 'openai_compatible',
-    base_url: 'https://opencode.ai/zen/v1',
-    is_custom: false,
-    requires_base_url: false,
-    description: 'Curated models including Claude, GPT, Gemini and more',
-  },
-  {
-    id: 'openai',
-    name: 'OpenAI',
-    provider_type: 'openai_compatible',
-    base_url: 'https://api.openai.com/v1',
-    is_custom: false,
-    requires_base_url: false,
-    description: 'GPT models for fast, capable general AI tasks',
-  },
-  {
-    id: 'custom',
-    name: 'Custom Provider',
-    provider_type: 'openai_compatible',
-    base_url: '',
-    is_custom: true,
-    requires_base_url: true,
-    description: 'OpenAI-compatible gateway, vLLM, Ollama, Groq, or custom proxy',
-  },
-  {
-    id: 'agentrouter',
-    name: 'AgentRouter',
-    provider_type: 'openai_compatible',
-    base_url: 'https://agentrouter.org/v1',
-    is_custom: false,
-    requires_base_url: false,
-    description: 'AgentRouter LLM proxy (https://agentrouter.org)',
-  },
-  {
-    id: 'nvidia',
-    name: 'NVIDIA NIM',
-    provider_type: 'openai_compatible',
-    base_url: 'https://integrate.api.nvidia.com/v1',
-    is_custom: false,
-    requires_base_url: false,
-    description: 'NVIDIA NIM microservices API',
-  },
-  {
-    id: 'anthropic',
-    name: 'Anthropic Claude',
-    provider_type: 'anthropic',
-    base_url: 'https://api.anthropic.com/v1',
-    is_custom: false,
-    requires_base_url: false,
-    description: 'Anthropic Claude models via Messages API',
-  },
-  {
-    id: 'cloudflare',
-    name: 'Cloudflare Workers AI',
-    provider_type: 'openai_compatible',
-    base_url: 'https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1',
-    is_custom: false,
-    requires_base_url: true,
-    description: 'Cloudflare Workers AI serverless GPU models (https://dash.cloudflare.com/)',
-  },
-  {
-    id: 'gemini',
-    name: 'Google AI Studio / Gemini',
-    provider_type: 'gemini',
-    base_url: 'https://generativelanguage.googleapis.com/v1beta',
-    is_custom: false,
-    requires_base_url: false,
-    description: 'Google Gemini models via Generative Language API',
-  },
-]
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -109,18 +33,6 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>
-}
-
-/**
- * Fetch provider presets metadata from backend.
- */
-export async function getProviderPresets(): Promise<ProviderPreset[]> {
-  try {
-    const res = await requestJson<{ presets: ProviderPreset[] }>('/providers/presets')
-    return res.presets || DEFAULT_PRESETS
-  } catch {
-    return DEFAULT_PRESETS
-  }
 }
 
 /**
@@ -158,13 +70,6 @@ export async function testProviderConnection(config: ClientProviderConfig): Prom
       selected_model: config.selected_model,
     }),
   })
-}
-
-/**
- * Get active provider info from backend.
- */
-export async function getBackendActiveProvider(): Promise<ActiveProviderInfo> {
-  return requestJson<ActiveProviderInfo>('/providers/active')
 }
 
 /**

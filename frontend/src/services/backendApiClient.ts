@@ -1,8 +1,6 @@
 import type {
-  HealthResponse,
   LlmResponse,
   SecurityCheckResponse,
-  SecurityEvent,
   WebpageContent,
   ChatHistoryTurn,
   ChatAttachment,
@@ -55,18 +53,6 @@ export function checkWebpage(content: WebpageContent): Promise<SecurityCheckResp
     method: 'POST',
     body: JSON.stringify(content),
   })
-}
-
-export async function getSecurityEvents(): Promise<SecurityEvent[]> {
-  try {
-    return await requestJson<SecurityEvent[]>('/security/events')
-  } catch {
-    return []
-  }
-}
-
-export function getHealth(): Promise<HealthResponse> {
-  return requestJson<HealthResponse>('/health')
 }
 
 export type ChatPageContext = {

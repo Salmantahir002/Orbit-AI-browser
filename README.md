@@ -92,8 +92,9 @@ Prompt_injection_defense_in_AI_Native_Browser/
 │   │       ├── verificationEngine.ts     # Pre/post action state validation
 │   │       └── waitEngine.ts             # Quiescence and navigation synchronizer
 │   ├── src/                              # React 19 UI Application
-│   │   ├── App.tsx                       # Main shell layout, tab manager, drawer state
+│   │   ├── App.tsx                       # Welcome screen; lazy-loads the browser shell on start
 │   │   ├── components/                   # UI components
+│   │   │   ├── BrowserShell.tsx          # Main shell layout, tab manager, drawer state
 │   │   │   ├── BrowserWebView.tsx        # Host container synchronizing WebContentsView bounds
 │   │   │   ├── BrowserToolbar.tsx        # Navigation controls, address bar, and Scan Page trigger
 │   │   │   ├── BookmarkBar.tsx           # Full-featured bookmark toolbar
@@ -102,7 +103,6 @@ Prompt_injection_defense_in_AI_Native_Browser/
 │   │   │   ├── PromptInputBox.tsx        # Universal prompt input with multimodal attachment staging
 │   │   │   ├── PromptModelPicker.tsx     # In-prompt model selection and routing popover
 │   │   │   ├── ProviderSettingsModal.tsx # Multi-provider connection & key configuration
-│   │   │   ├── ClassifierDecisionBreakdown.tsx # Dual-detector verdict & score visualization
 │   │   │   ├── WebpageAnalysisDetailsPanel.tsx # 22-channel inspection explainability drawer
 │   │   │   ├── PromptAnalysisDetailsPanel.tsx  # Direct prompt analysis explainability drawer
 │   │   │   └── KimoMascot.tsx            # Animated Kimo visual identity and mascot
@@ -295,7 +295,7 @@ cd frontend
 npm run package
 ```
 
-The packaging configuration (`frontend/electron-builder.yml`) bundles the compiled Node backend inside `resources/backend` and runs it using Electron's bundled Node runtime (`ELECTRON_RUN_AS_NODE=1`), requiring zero external Node.js installation on end-user machines.
+The packaging configuration (`frontend/electron-builder.yml`) bundles the compiled Node backend inside `resources/backend` and runs it using Electron's bundled Node runtime (`ELECTRON_RUN_AS_NODE=1`), requiring zero external Node.js installation on end-user machines. `npm run package` first runs `npm run package:stage` (`frontend/scripts/stage-backend.mjs`), which copies only the backend's production dependencies and this platform's onnxruntime binary into `frontend/build/backend`; that staged copy, not `backend-node/node_modules`, is what ships.
 
 ---
 

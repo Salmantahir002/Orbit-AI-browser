@@ -2,6 +2,11 @@ import type { PageStateSnapshot, RuntimeCommandName } from './browserRuntimeType
 
 /** Tool names the planner may emit. Mirrors backend `agent_tool_registry.py`. */
 export type AgentToolName =
+  | 'evaluate'
+  | 'element_bounds'
+  | 'dispatch_mouse_event'
+  | 'drag'
+  | 'extract_virtual_table'
   | 'click'
   | 'fill'
   | 'type'
@@ -29,14 +34,50 @@ export type AgentPlanResponse = {
   needs_user_confirmation: boolean
   reason: string
   thought?: string
+  /** The planner's checklist for the whole goal, re-stated every round. */
+  progress?: AgentProgressItem[]
   model: string
   planner_mode: 'llm'
+}
+
+export type AgentProgressStatus = 'done' | 'in_progress' | 'todo'
+
+export type AgentProgressItem = {
+  step: string
+  status: AgentProgressStatus
+}
+
+/**
+ * A record of text the agent itself entered into a page. Kept for the whole
+ * task — unlike the rolling step log — because re-typing content that is
+ * already there is the one mistake that visibly corrupts the user's document.
+ */
+export type AgentContentEntry = {
+  step: number
+  tool: string
+  target?: string
+  page: string
+  chars: number
+  head: string
+  tail: string
+  /** `unverifiable`: keystrokes were delivered but the editor hides its content (canvas editors). */
+  status: 'verified' | 'unverifiable' | 'failed'
+}
+
+/** One finished task earlier in this app session, for follow-up goals. */
+export type AgentSessionTaskRecord = {
+  goal: string
+  status: string
+  outcome: string
+  milestones: string[]
+  finalUrl: string
 }
 
 export type AgentStepRecord = {
   tool: string
   summary: string
   succeeded: boolean
+  step?: number
 }
 
 export type AgentFailureRecord = {
@@ -59,6 +100,11 @@ export type AgentWorkingMemorySnapshot = {
   extracted_knowledge?: string[]
   invalid_elements?: string[]
   last_thought?: string
+  step_number?: number
+  plan_progress?: AgentProgressItem[]
+  milestones?: string[]
+  content_entered?: AgentContentEntry[]
+  session_history?: AgentSessionTaskRecord[]
 }
 
 export type AgentPlanRequest = {
@@ -76,41 +122,7 @@ export type ResolvedToolCommand = {
   params: Record<string, unknown>
 } | null
 
-export type AgentThreatFinding = {
-  source: string
-  confidence: number
-  matched_patterns: string[]
-  matched_evidence: string[]
-  excerpt: string
-  /** Which detector(s) flagged the chunk: the rule engine, Prompt Guard, or both. */
-  detector_source: 'none' | 'rule_based' | 'dl_model' | 'both'
-  /** Prompt Guard's MALICIOUS probability, or null when no DL model is loaded. */
-  malicious_score: number | null
-}
-
-/** Verdict from POST /api/v1/agent/scan-active-page. */
-export type AgentScanDecision = {
-  allowed: boolean
-  task_id: string
-  url: string
-  page_hash: string
-  risk_level: 'low' | 'medium' | 'high'
-  confidence: number
-  summary_reason: string
-  matched_patterns: string[]
-  blocked_sources: string[]
-  findings: AgentThreatFinding[]
-  scanned_chunks: number
-  classifier_mode: string
-  model_precision: string
-  scanned_at: string
-  /** Set locally when a cached verdict was reused instead of rescanning. */
-  fromCache?: boolean
-}
-
 export type AgentAbortReason =
-  | 'injection_detected'
-  | 'scan_failed'
   | 'planner_failed'
   | 'action_failed'
   | 'needs_confirmation'
@@ -118,15 +130,7 @@ export type AgentAbortReason =
   | 'step_limit'
   | 'cancelled'
 
-export type AgentTaskStatus = 'idle' | 'running' | 'completed' | 'blocked' | 'failed'
-
-export type AgentIterationOutcome = {
-  status: 'continue' | 'finished' | 'aborted'
-  reason?: AgentAbortReason
-  message: string
-  toolCall?: AgentToolCall
-  decision?: AgentScanDecision | null
-}
+export type AgentTaskStatus = 'idle' | 'running' | 'completed' | 'failed'
 
 export type AgentTaskResult = {
   taskId: string
@@ -134,5 +138,4 @@ export type AgentTaskResult = {
   message: string
   steps: number
   reason?: AgentAbortReason
-  decision?: AgentScanDecision | null
 }

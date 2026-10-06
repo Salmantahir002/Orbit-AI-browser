@@ -6,7 +6,6 @@ export type BrowserWebViewHandle = {
   extractContent: () => Promise<WebpageContent | null>
   /** Browser Runtime target id for this tab; null before the webview attaches. */
   getWebContentsId: () => number | null
-  getURL: () => string
   goBack: () => void
   goForward: () => void
   loadURL: (url: string) => void
@@ -16,6 +15,7 @@ export type BrowserWebViewHandle = {
 
 type BrowserWebViewProps = {
   initialUrl: string
+  initialWebContentsId?: number
   isActive: boolean
   /** True while a drawer/modal must paint over this tab, or a drag (e.g. the assistant
    *  panel resize) must not have its pointer events swallowed by the guest content. */
@@ -193,6 +193,7 @@ function HomePage({ onSearch }: HomePageProps) {
 export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewProps>(
   function BrowserWebView({
     initialUrl,
+    initialWebContentsId,
     isActive,
     isObscured = false,
     tabId,
@@ -203,14 +204,15 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
     onSearch,
   }, ref) {
     const containerRef = useRef<HTMLDivElement | null>(null)
-    const webContentsIdRef = useRef<number | null>(null)
+    const webContentsIdRef = useRef<number | null>(initialWebContentsId ?? null)
+    const popupMountGenerationRef = useRef(0)
     // The tab is created once, at mount, from this URL. Subsequent navigation
     // always goes through loadURL().
     const webviewInitialUrlRef = useRef(initialUrl)
     const [activeUrl, setActiveUrl] = useState(initialUrl)
     const [errorMessage, setErrorMessage] = useState('')
     const isElectronRuntime = Boolean(window.electronAPI)
-    const isHomePage = activeUrl === HOMEPAGE_URL
+    const isHomePage = activeUrl === HOMEPAGE_URL && initialWebContentsId === undefined
 
     // The guest content is a native view main composites on top of this whole
     // window — nothing in our own DOM can paint over it with CSS. Whenever
@@ -223,18 +225,24 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
       shouldShowGuestRef.current = shouldShowGuest
     }, [shouldShowGuest])
 
+    // Re-arming the ResizeObserver (every show/hide toggle) fires it once immediately, and a
+    // resize can settle on the rect it started from. Identical bounds are not worth an IPC message.
+    const lastSentBoundsRef = useRef('')
     const pushBounds = useCallback(() => {
       const webContentsId = webContentsIdRef.current
       const container = containerRef.current
       if (webContentsId === null || !container || !window.electronAPI) return
 
-      if (!shouldShowGuestRef.current) {
-        window.electronAPI.browser.setBounds(webContentsId, { x: 0, y: 0, width: 0, height: 0 })
-        return
+      let bounds = { x: 0, y: 0, width: 0, height: 0 }
+      if (shouldShowGuestRef.current) {
+        const rect = container.getBoundingClientRect()
+        bounds = { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
       }
 
-      const rect = container.getBoundingClientRect()
-      window.electronAPI.browser.setBounds(webContentsId, { x: rect.x, y: rect.y, width: rect.width, height: rect.height })
+      const key = `${webContentsId}:${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}`
+      if (key === lastSentBoundsRef.current) return
+      lastSentBoundsRef.current = key
+      window.electronAPI.browser.setBounds(webContentsId, bounds)
     }, [])
 
     useImperativeHandle(ref, () => ({
@@ -249,7 +257,6 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
         }
       },
       getWebContentsId: () => webContentsIdRef.current,
-      getURL: () => activeUrl,
       goBack: () => {
         const webContentsId = webContentsIdRef.current
         if (webContentsId !== null) window.electronAPI?.browser.goBack(webContentsId)
@@ -276,7 +283,7 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
         const webContentsId = webContentsIdRef.current
         if (webContentsId !== null) window.electronAPI?.browser.stop(webContentsId)
       },
-    }), [activeUrl])
+    }), [])
 
     // Creates this tab's guest view in main on mount, tears it down on unmount.
     // Runs once per component instance — a tab never changes which guest it owns.
@@ -284,11 +291,38 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
       if (!isElectronRuntime) return undefined
       let cancelled = false
 
-      window.electronAPI!.browser.createTab(webviewInitialUrlRef.current).then((result) => {
-        if (cancelled || !result) return
-        webContentsIdRef.current = result.webContentsId
-        containerRef.current?.setAttribute('data-webcontents-id', String(result.webContentsId))
+      if (initialWebContentsId !== undefined) {
+        const generationRef = popupMountGenerationRef
+        const generation = ++generationRef.current
+        containerRef.current?.setAttribute('data-webcontents-id', String(initialWebContentsId))
         pushBounds()
+        return () => {
+          cancelled = true
+          queueMicrotask(() => {
+            if (generationRef.current === generation) {
+              void window.electronAPI?.browser.closeTab(initialWebContentsId)
+            }
+          })
+        }
+      }
+
+      // StrictMode (dev) runs this effect, cleans it up, and runs it again within one synchronous
+      // pass. Asking main for the view in a microtask lets that first, already-cancelled run bail
+      // out before it requests anything, so a tab is one WebContentsView and not one that is
+      // created and immediately destroyed (which logged a burst of CDP "target closed" errors).
+      queueMicrotask(() => {
+        if (cancelled) return
+        window.electronAPI!.browser.createTab(webviewInitialUrlRef.current).then((result) => {
+          if (!result) return
+          if (cancelled) {
+            // Closed while main was still creating it.
+            void window.electronAPI?.browser.closeTab(result.webContentsId)
+            return
+          }
+          webContentsIdRef.current = result.webContentsId
+          containerRef.current?.setAttribute('data-webcontents-id', String(result.webContentsId))
+          pushBounds()
+        })
       })
 
       return () => {
@@ -296,7 +330,19 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
         const webContentsId = webContentsIdRef.current
         if (webContentsId !== null) void window.electronAPI?.browser.closeTab(webContentsId)
       }
-    }, [isElectronRuntime, pushBounds])
+    }, [initialWebContentsId, isElectronRuntime, pushBounds])
+
+    useEffect(() => {
+      if (initialWebContentsId === undefined) return undefined
+      let cancelled = false
+      window.electronAPI?.browser.getTabInfo(initialWebContentsId).then((info) => {
+        if (cancelled || !info) return
+        setActiveUrl(info.url)
+        onNavigate(tabId, info.url)
+        if (info.title) onTitleChange?.(tabId, info.title)
+      })
+      return () => { cancelled = true }
+    }, [initialWebContentsId, onNavigate, onTitleChange, tabId])
 
     // Keeps the guest's bounds in sync with this container's on-screen rect —
     // window resizes, the assistant panel opening, and active/obscured toggles

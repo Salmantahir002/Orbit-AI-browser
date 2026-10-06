@@ -151,7 +151,26 @@ export type ScreenshotParams = { fullPage?: boolean }
 export type OverlayParams = { active: boolean }
 export type EmptyParams = Record<string, never>
 
+export type EvaluateParams = { expression: string; timeoutMs?: number }
+export type BoundsParams = { selector: string }
+export type MouseParams = {
+  type: 'mousePressed' | 'mouseMoved' | 'mouseReleased' | 'mouseWheel'
+  x: number; y: number; button?: 'none' | 'left' | 'right' | 'middle'
+  buttons?: number; clickCount?: number; deltaX?: number; deltaY?: number; modifiers?: number
+}
+export type DragParams = { startX: number; startY: number; endX: number; endY: number; steps?: number }
+export type VirtualTableParams = {
+  rowSelector: string; scrollSelector: string; columns: string
+  keyAttribute: string; indexAttribute: string; startIndex?: number; count?: number
+}
+export type BrowserObservation = { value: unknown }
+
 export type RuntimeCommandMap = {
+  evaluate: { params: EvaluateParams; result: BrowserObservation }
+  elementBounds: { params: BoundsParams; result: BrowserObservation }
+  dispatchMouseEvent: { params: MouseParams; result: BrowserObservation }
+  drag: { params: DragParams; result: BrowserObservation }
+  extractVirtualTable: { params: VirtualTableParams; result: BrowserObservation }
   describeTarget: { params: EmptyParams; result: TargetDescriptor }
   navigate: { params: NavigateParams; result: NavigationResult }
   click: { params: ClickParams; result: ActionAck }

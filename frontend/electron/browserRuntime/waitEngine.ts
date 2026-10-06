@@ -168,6 +168,6 @@ export async function waitForDomStable(session: CdpSession, options: WaitOptions
  */
 export async function settleAfterAction(session: CdpSession, options: WaitOptions = {}): Promise<AXNode[] | null> {
   const quiet = quietPeriodMs(options)
-  await waitForNetworkIdle(session, { timeoutMs: 2_500, quietPeriodMs: quiet }).catch(() => undefined)
-  return waitForDomStable(session, { timeoutMs: 2_500, quietPeriodMs: quiet }).catch(() => null)
+  await waitForNetworkIdle(session, { timeoutMs: 3_000, quietPeriodMs: quiet }).catch(() => undefined)
+  return waitForDomStable(session, { timeoutMs: 3_000, quietPeriodMs: quiet }).catch(() => null)
 }

@@ -1,4 +1,5 @@
 import { _electron as electron, test, expect, type ElectronApplication, type Page } from '@playwright/test'
+import { createServer } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -39,21 +40,26 @@ test.describe('Prompt Defense Application E2E tests', () => {
 
   async function openBrowserShell() {
     const startButton = window.locator('.start-button')
+    const browserFrame = window.locator('.browser-frame')
+
+    // The window exists before React has rendered into it, so wait for whichever
+    // screen is up rather than sampling isVisible() once and skipping the click.
+    await startButton.or(browserFrame).first().waitFor({ state: 'visible' })
     if (await startButton.isVisible()) {
       await startButton.click()
     }
 
-    await expect(window.locator('.browser-frame')).toBeVisible()
+    await expect(browserFrame).toBeVisible()
   }
 
   test('should load startup screen correctly', async () => {
     // Verify window title
-    expect(await window.title()).toBe('Prompt Defense')
+    expect(await window.title()).toBe('Orbit')
 
     // Verify the welcome screen header
     const welcomeTitle = window.locator('.welcome-title')
     await expect(welcomeTitle).toBeVisible()
-    await expect(welcomeTitle).toHaveText('Welcome to Prompt Defense')
+    await expect(welcomeTitle).toHaveText('Welcome to Orbit')
 
     // Verify presence of solar system animations and the Get started button
     const solarSystem = window.locator('.solar-system')
@@ -75,14 +81,14 @@ test.describe('Prompt Defense Application E2E tests', () => {
     await openBrowserShell()
 
     // A new tab deliberately starts with an empty address field.
-    const addressInput = window.locator('input[aria-label="URL"]')
+    const addressInput = window.locator('input[aria-label="Address and search bar"]')
     await expect(addressInput).toBeVisible()
     await expect(addressInput).toHaveValue('')
 
     // Back, Forward and Reload buttons should render
     await expect(window.locator('button[aria-label="Back"]')).toBeVisible()
     await expect(window.locator('button[aria-label="Forward"]')).toBeVisible()
-    await expect(window.locator('button[aria-label="Reload"]')).toBeVisible()
+    await expect(window.locator('button[aria-label="Reload this page"]')).toBeVisible()
 
     // Scan and Assistant buttons should render
     await expect(window.locator('.scan-button')).toBeVisible()
@@ -114,5 +120,57 @@ test.describe('Prompt Defense Application E2E tests', () => {
     // Toggle it back off
     await assistantPill.click()
     await expect(assistantPanel).not.toBeVisible()
+  })
+
+  test('keeps a site opened sign-in page in Orbit and signed in after refresh', async () => {
+    await openBrowserShell()
+    let docsRequests = 0
+    const server = createServer((request, response) => {
+      if (request.url === '/signin') {
+        response.writeHead(302, { Location: '/docs', 'Set-Cookie': 'session=active; Path=/' })
+        response.end()
+      } else {
+        response.setHeader('Content-Type', 'text/html')
+        if (request.url === '/docs') docsRequests += 1
+        response.end(request.url === '/docs'
+          ? `<h1>${request.headers.cookie?.includes('session=active') ? 'Signed in' : 'Signed out'}</h1>`
+          : '<a href="/signin" target="_blank">Sign in</a>')
+      }
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const address = server.address()
+      if (!address || typeof address === 'string') throw new Error('Test server has no port')
+      const guestId = Number(await window.locator('.browser-webview[data-webcontents-id]').first().getAttribute('data-webcontents-id'))
+      await electronApp.evaluate(async ({ webContents }, { id, url }) => {
+        await webContents.fromId(id)!.loadURL(url)
+      }, { id: guestId, url: `http://127.0.0.1:${address.port}/` })
+      await electronApp.evaluate(async ({ webContents }, id) => {
+        await webContents.fromId(id)!.executeJavaScript('document.querySelector("a").click()', true)
+      }, guestId)
+
+      await expect(window.locator('.tab')).toHaveCount(2)
+      await expect(window.locator('input[aria-label="Address and search bar"]')).toHaveValue(/\/docs$/)
+      // Guest tabs are WebContentsViews, which Playwright also lists as pages, so
+      // count real OS windows instead: the popup must not have opened one.
+      expect(await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1)
+      // The tab UI owns the popup WebContentsView; inspect its rendered page through Electron.
+      const activeGuestId = Number(await window.locator('.browser-webview[data-webcontents-id]').last().getAttribute('data-webcontents-id'))
+      expect(activeGuestId).toBeTruthy()
+      await expect.poll(() => electronApp.evaluate(async ({ webContents }, id) =>
+        webContents.fromId(id)!.executeJavaScript('document.body.textContent'), activeGuestId)).toContain('Signed in')
+      const requestsBeforeReload = docsRequests
+      await window.locator('button[aria-label="Reload this page"]').click()
+      await expect.poll(() => docsRequests).toBeGreaterThan(requestsBeforeReload)
+      await expect.poll(() => electronApp.evaluate(async ({ webContents }, id) =>
+        webContents.fromId(id)!.executeJavaScript('document.body.textContent'), activeGuestId)).toContain('Signed in')
+      await electronApp.evaluate(async ({ webContents }, { id, url }) => {
+        await webContents.fromId(id)!.loadURL(url)
+      }, { id: guestId, url: `http://127.0.0.1:${address.port}/docs` })
+      expect(await electronApp.evaluate(async ({ webContents }, id) =>
+        webContents.fromId(id)!.executeJavaScript('document.body.textContent'), guestId)).toContain('Signed in')
+    } finally {
+      server.close()
+    }
   })
 })

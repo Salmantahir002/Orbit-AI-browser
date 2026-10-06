@@ -55,6 +55,32 @@ export function toolSignature(s: ToolSpec): string {
 
 const TOOL_SPECS: readonly ToolSpec[] = [
   spec({
+    name: 'evaluate',
+    description: 'Evaluate JavaScript in the guest page and return JSON data to working memory. Include description: a short plain-language label naming what you are checking, such as Checking that winnings are sorted highest first. Inspect the result next.',
+    parameters: [param('expression', 'string', true, 'expression'), param('timeoutMs', 'number', false, 'timeoutMs'), param('description', 'string', false, 'Short user-facing description of what is being checked')],
+  }),
+  spec({
+    name: 'element_bounds',
+    description: 'Get viewport CSS bounds for a selector (open shadow roots: host >>> child).',
+    parameters: [param('selector', 'string', true, 'selector')],
+  }),
+  spec({
+    name: 'dispatch_mouse_event',
+    description: 'Send CDP Input.dispatchMouseEvent with viewport CSS coordinates: mousePressed, mouseMoved, mouseReleased or mouseWheel.',
+    parameters: [param('type', 'string', true, 'type'), param('x', 'number', true, 'x'), param('y', 'number', true, 'y'), param('button', 'string', false, 'button'), param('buttons', 'number', false, 'buttons'), param('clickCount', 'number', false, 'clickCount'), param('deltaX', 'number', false, 'deltaX'), param('deltaY', 'number', false, 'deltaY'), param('modifiers', 'number', false, 'modifiers')],
+  }),
+  spec({
+    name: 'drag',
+    description: 'Drag with native press, interpolated moves and guaranteed release. Verify resulting DOM order.',
+    parameters: [param('startX', 'number', true, 'startX'), param('startY', 'number', true, 'startY'), param('endX', 'number', true, 'endX'), param('endY', 'number', true, 'endY'), param('steps', 'number', false, 'steps')],
+  }),
+  spec({
+    name: 'extract_virtual_table',
+    description: 'Capture contiguous top N virtual rows with native wheel events and fresh DOM reads. Deduplicates stable IDs and returns completeness, row evidence and TSV. Inspect selectors first.',
+    parameters: [param('rowSelector', 'string', true, 'rowSelector'), param('scrollSelector', 'string', true, 'scrollSelector'), param('columns', 'string', true, 'columns'), param('keyAttribute', 'string', true, 'keyAttribute'), param('indexAttribute', 'string', true, 'indexAttribute'), param('startIndex', 'number', false, 'startIndex'), param('count', 'number', false, 'count')],
+  }),
+
+  spec({
     name: 'click',
     description:
       'Click an element on the page (button, link, option, tab). ' +
@@ -66,7 +92,8 @@ const TOOL_SPECS: readonly ToolSpec[] = [
     description:
       "Replace the contents of an editable input field (role 'textbox', 'searchbox', 'combobox', 'input') " +
       'with a text value. Always use this to enter search queries, form data, or filter/setting values ' +
-      "(e.g. a price, quantity, or date field) — prefer it over 'type' whenever the field has an element id.",
+      "(e.g. a price, quantity, or date field) — prefer it over 'type' whenever the field has an element id. " +
+      'In an email To/Cc field it also commits each address as a recipient; no Enter is needed afterwards.',
     parameters: [
       param('target', 'element_id', true, 'Element id of the input field'),
       param('value', 'string', true, 'Text to enter'),
@@ -74,7 +101,10 @@ const TOOL_SPECS: readonly ToolSpec[] = [
   }),
   spec({
     name: 'type',
-    description: 'Type text into whatever currently has focus.',
+    description:
+      'Type text into whatever currently has focus (e.g. a rich-text/document editor body after clicking into it). ' +
+      'Appends at the cursor; it never replaces. Send long content in one call with \\n for new lines. ' +
+      'Text listed under CONTENT ALREADY ENTERED must never be typed again.',
     parameters: [param('text', 'string', true, 'Text to type')],
   }),
   spec({
@@ -190,7 +220,7 @@ export function renderToolCatalogue(): string {
 }
 
 function validateNumber(name: string, value: unknown): number {
-  if (typeof value === 'boolean' || typeof value !== 'number' || Number.isNaN(value)) {
+  if (typeof value === 'boolean' || typeof value !== 'number' || !Number.isFinite(value)) {
     throw new ToolValidationError(`Argument '${name}' must be a number.`)
   }
   return value
@@ -315,7 +345,7 @@ export function validateToolCall(
 export const MAX_QUEUE_LENGTH = 4
 
 // Tools whose element ids come from the state the planner was given.
-const ELEMENT_DEPENDENT = new Set(['click', 'fill', 'upload', 'scroll'])
+const ELEMENT_DEPENDENT = new Set(['click', 'fill', 'upload', 'scroll', 'evaluate', 'element_bounds', 'dispatch_mouse_event', 'drag', 'extract_virtual_table'])
 
 /**
  * Validates a short action queue. Beyond per-call validation, the queue as a
@@ -341,6 +371,10 @@ export function validateToolQueue(
 
   for (let index = 0; index < payloads.length; index++) {
     const [toolName, args] = validateToolCall(payloads[index], knownElementIds)
+
+    if (index > 0 && ['evaluate', 'element_bounds', 'dispatch_mouse_event', 'drag', 'extract_virtual_table'].includes(validated[index - 1]![0])) {
+      throw new ToolValidationError('Observe the previous tool result before planning dependent actions.')
+    }
 
     if (index > 0 && validated[index - 1]![0] === 'finish') {
       throw new ToolValidationError("No action may follow 'finish'.")

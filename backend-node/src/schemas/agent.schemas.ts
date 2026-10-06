@@ -1,77 +1,12 @@
 // Port of backend/app/schemas/agent_schemas.py.
-// Deliberately separate from security.schemas.ts, even though field names
-// overlap: the manual-scan contract and the agent contract must be able to
-// change independently — that isolation is the whole point.
+// Deliberately separate from security.schemas.ts: the manual-scan contract and the
+// agent contract must be able to change independently.
 //
-// Phase 3 ported the /agent/scan-active-page + /agent/security/events +
-// /agent/tools slice below. Phase 4 adds AgentPlanRequest/AgentPlanResponse
-// and the working-memory/page-state schemas the LLM-backed planner consumes.
+// The agent has no security-scan contract: agent mode does not scan pages, and only the
+// user-initiated Scan Page button does (POST /security/check-webpage). What is here is the
+// LLM-backed planner's contract: AgentPlanRequest/AgentPlanResponse and the
+// working-memory/page-state schemas it consumes.
 import { Type, type Static } from '@sinclair/typebox'
-
-// Every field defaults to "" in the Python model — all optional here too.
-export const AgentPageSnapshotSchema = Type.Object({
-  visible_text: Type.Optional(Type.String()),
-  hidden_text: Type.Optional(Type.String()),
-  html_comments: Type.Optional(Type.String()),
-  meta_tags: Type.Optional(Type.String()),
-  input_values: Type.Optional(Type.String()),
-  aria_text: Type.Optional(Type.String()),
-  iframe_content: Type.Optional(Type.String()),
-  shadow_dom_content: Type.Optional(Type.String()),
-  inline_javascript: Type.Optional(Type.String()),
-  external_javascript: Type.Optional(Type.String()),
-  css_content: Type.Optional(Type.String()),
-  css_generated_content: Type.Optional(Type.String()),
-  dom_snapshot_content: Type.Optional(Type.String()),
-  page_title: Type.Optional(Type.String()),
-  url: Type.Optional(Type.String()),
-  // Node-only extended channel (Phase 2) — see security.routes.ts. Accepted
-  // here too since the same CDP capture is reused for both scan paths.
-  source_maps: Type.Optional(Type.String()),
-})
-
-export const AgentScanRequestSchema = Type.Object({
-  task_id: Type.String(),
-  url: Type.Optional(Type.String()),
-  page_hash: Type.Optional(Type.String()),
-  snapshot: AgentPageSnapshotSchema,
-})
-
-export const AgentThreatFindingSchema = Type.Object({
-  source: Type.String(),
-  confidence: Type.Number(),
-  matched_patterns: Type.Array(Type.String()),
-  matched_evidence: Type.Array(Type.String()),
-  excerpt: Type.String(),
-  detector_source: Type.Union([
-    Type.Literal('none'),
-    Type.Literal('rule_based'),
-    Type.Literal('dl_model'),
-    Type.Literal('both'),
-  ]),
-  malicious_score: Type.Union([Type.Number(), Type.Null()]),
-})
-
-export const AgentScanResponseSchema = Type.Object({
-  allowed: Type.Boolean(),
-  task_id: Type.String(),
-  url: Type.String(),
-  page_hash: Type.String(),
-  risk_level: Type.Union([Type.Literal('low'), Type.Literal('medium'), Type.Literal('high')]),
-  confidence: Type.Number(),
-  summary_reason: Type.String(),
-  matched_patterns: Type.Array(Type.String()),
-  blocked_sources: Type.Array(Type.String()),
-  findings: Type.Array(AgentThreatFindingSchema),
-  scanned_chunks: Type.Integer(),
-  classifier_mode: Type.String(),
-  model_precision: Type.String(),
-  scanned_at: Type.String(),
-})
-
-export type AgentPageSnapshot = Static<typeof AgentPageSnapshotSchema>
-export type AgentScanRequest = Static<typeof AgentScanRequestSchema>
-export type AgentScanResponse = Static<typeof AgentScanResponseSchema>
 
 // ─────────────────────────── Phase 4: planner contract ───────────────────────────
 // One actionable element, as produced by the frontend State Builder.
@@ -125,6 +60,33 @@ export const AgentStepRecordSchema = Type.Object({
   tool: Type.String(),
   summary: Type.Optional(Type.String()),
   succeeded: Type.Optional(Type.Boolean()),
+  step: Type.Optional(Type.Integer()),
+})
+
+export const AgentProgressItemSchema = Type.Object({
+  step: Type.String(),
+  status: Type.Union([Type.Literal('done'), Type.Literal('in_progress'), Type.Literal('todo')]),
+})
+
+// Text the agent itself entered. Kept for the whole task, unlike the rolling
+// step log, so the planner can never lose track of content it already wrote.
+export const AgentContentEntrySchema = Type.Object({
+  step: Type.Integer(),
+  tool: Type.String(),
+  target: Type.Optional(Type.String()),
+  page: Type.String(),
+  chars: Type.Integer(),
+  head: Type.String(),
+  tail: Type.String(),
+  status: Type.Union([Type.Literal('verified'), Type.Literal('unverifiable'), Type.Literal('failed')]),
+})
+
+export const AgentSessionTaskSchema = Type.Object({
+  goal: Type.String(),
+  status: Type.String(),
+  outcome: Type.String(),
+  milestones: Type.Array(Type.String()),
+  finalUrl: Type.String(),
 })
 
 export const AgentFailureRecordSchema = Type.Object({
@@ -146,6 +108,11 @@ export const AgentWorkingMemorySchema = Type.Object({
   extracted_knowledge: Type.Optional(Type.Array(Type.String())),
   invalid_elements: Type.Optional(Type.Array(Type.String())),
   last_thought: Type.Optional(Type.String()),
+  step_number: Type.Optional(Type.Integer()),
+  plan_progress: Type.Optional(Type.Array(AgentProgressItemSchema)),
+  milestones: Type.Optional(Type.Array(Type.String())),
+  content_entered: Type.Optional(Type.Array(AgentContentEntrySchema)),
+  session_history: Type.Optional(Type.Array(AgentSessionTaskSchema)),
 })
 
 export const AgentPlanRequestSchema = Type.Object({
@@ -168,6 +135,7 @@ export const AgentPlanResponseSchema = Type.Object({
   needs_user_confirmation: Type.Boolean(),
   reason: Type.String(),
   thought: Type.Optional(Type.String()),
+  progress: Type.Optional(Type.Array(AgentProgressItemSchema)),
   model: Type.String(),
   planner_mode: Type.Literal('llm'),
 })
@@ -178,6 +146,7 @@ export type AgentValidationIssue = Static<typeof AgentValidationIssueSchema>
 export type AgentPageState = Static<typeof AgentPageStateSchema>
 export type AgentStepRecord = Static<typeof AgentStepRecordSchema>
 export type AgentFailureRecord = Static<typeof AgentFailureRecordSchema>
+export type AgentProgressItem = Static<typeof AgentProgressItemSchema>
 export type AgentWorkingMemory = Static<typeof AgentWorkingMemorySchema>
 export type AgentPlanRequest = Static<typeof AgentPlanRequestSchema>
 export type AgentToolCall = Static<typeof AgentToolCallSchema>

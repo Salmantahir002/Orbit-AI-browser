@@ -6,6 +6,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' http://localhost:8000 http://127.0.0.1:8000 ws://localhost:5173 ws://127.0.0.1:5173;" />
     <title>Orbit</title>
+    <!-- Fonts are progressive enhancement: loaded without blocking first paint (an @import inside the
+         bundled CSS would hold the whole page back on a slow or offline network). display=swap keeps
+         text visible in the fallback face until each font arrives. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Manrope:wght@500;600;700&family=Inter:wght@400;450;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap"
+      media="print"
+      onload="this.media='all'"
+    />
   </head>
   <body>
     <div id="root"></div>

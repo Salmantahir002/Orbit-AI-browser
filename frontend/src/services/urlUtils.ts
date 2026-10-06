@@ -108,20 +108,12 @@ export function getFaviconCandidates(url: string, explicitFavicon?: string): str
   return candidates
 }
 
-export function isValidUrl(url: string): boolean {
+function isValidUrl(url: string): boolean {
   try {
     const parsedUrl = new URL(url)
     return parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:'
   } catch {
     return false
-  }
-}
-
-export function extractDomain(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '')
-  } catch {
-    return url
   }
 }
 

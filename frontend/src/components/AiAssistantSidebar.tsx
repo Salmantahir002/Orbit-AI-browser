@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from 'react'
+import { memo, useRef, useState, useEffect } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react'
 import { checkPrompt, chatWithLlm, type ChatPageContext } from '../services/backendApiClient'
 import { extractPageContent } from '../services/pageContentExtractor'
@@ -120,7 +120,9 @@ function NewSessionIcon() {
   )
 }
 
-export function AiAssistantSidebar({
+// Memoized: the shell re-renders on every tab loading/favicon/title change, none of which
+// concern the chat. Its props are stable across those updates, so it now skips them.
+export const AiAssistantSidebar = memo(function AiAssistantSidebar({
   onViewDetails,
   activeTargetId = null,
   currentUrl = '',
@@ -678,4 +680,4 @@ export function AiAssistantSidebar({
       ) : null}
     </aside>
   )
-}
+})

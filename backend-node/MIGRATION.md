@@ -4,6 +4,14 @@ Tracks the staged port of `backend/` (Python) to `backend-node/` (Node). Parity
 was verified (prompt §28) and the Python `backend/` tree has been **removed** —
 `backend-node/` is now the only backend.
 
+> **Later change (2026-09-29): agent-mode scanning was removed.** Phase 3's agent
+> security slice no longer exists: `agentSecurityService.ts`,
+> `agentSecurityEventStore.ts`, the `AgentPageSnapshot`/`AgentScanRequest`/
+> `AgentScanResponse` schemas, `POST /agent/scan-active-page`, and
+> `GET /agent/security/events` (plus the frontend `agentSecurityPipeline`). Agent mode
+> has no prompt-injection scan; only the manual Scan Page path does. The mentions of
+> those pieces below are history, kept for the parity record.
+
 ## Phase plan
 
 | Phase | Scope | Status |
@@ -32,8 +40,8 @@ ports of the Pydantic models. `4xx` bodies keep FastAPI's `{"detail": "..."}` sh
 | GET | `/security/events` | `backendApiClient.getSecurityEvents` | `security_routes.py` | `routes/security.routes.ts` | 1 | ✅ ported |
 | POST | `/llm/chat` | `backendApiClient.chatWithLlm` | `llm_routes.py` | `routes/llm.routes.ts` | 4 | ✅ ported |
 | POST | `/agent/plan` | `agentApiClient.requestPlan` | `agent_routes.py` | `routes/agent.routes.ts` | 4 | ✅ ported |
-| POST | `/agent/scan-active-page` | `agentSecurityPipeline` | `agent_routes.py` | `routes/agent.routes.ts` | 3 | ✅ ported |
-| GET | `/agent/security/events` | — (no frontend caller found) | `agent_routes.py` | `routes/agent.routes.ts` | 3 | ✅ ported |
+| POST | `/agent/scan-active-page` | `agentSecurityPipeline` | `agent_routes.py` | `routes/agent.routes.ts` | 3 | ✅ ported, later removed |
+| GET | `/agent/security/events` | — (no frontend caller found) | `agent_routes.py` | `routes/agent.routes.ts` | 3 | ✅ ported, later removed |
 | GET | `/agent/tools` | — (no frontend caller found) | `agent_routes.py` | `routes/agent.routes.ts` | 3 | ✅ ported |
 | GET/POST/DELETE | `/providers/active` | `providerApiClient` | `provider_routes.py` | `routes/providers.routes.ts` | 4 | ✅ ported |
 | GET | `/providers/presets` | `providerApiClient.getProviderPresets` | `provider_routes.py` | `routes/providers.routes.ts` | 4 | ✅ ported |

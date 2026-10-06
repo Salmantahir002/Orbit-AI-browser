@@ -28,6 +28,11 @@ export function resolveToolCall(call: AgentToolCall): ResolvedToolCommand {
   const args = call.arguments ?? {}
 
   switch (call.tool) {
+    case 'evaluate': return { command: 'evaluate', params: { expression: asString(args.expression), timeoutMs: asNumber(args.timeoutMs) } }
+    case 'element_bounds': return { command: 'elementBounds', params: args }
+    case 'dispatch_mouse_event': return { command: 'dispatchMouseEvent', params: args }
+    case 'drag': return { command: 'drag', params: args }
+    case 'extract_virtual_table': return { command: 'extractVirtualTable', params: args }
     case 'click':
       return { command: 'click', params: { elementId: asString(args.target) } }
     case 'fill':

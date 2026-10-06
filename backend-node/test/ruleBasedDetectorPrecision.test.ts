@@ -9,8 +9,8 @@ import { ruleBasedDetector } from '../src/services/ruleBasedDetectorService.js'
 import { MANUAL_SCAN_CHANNELS } from '../src/routes/security.routes.js'
 
 describe('channel list invariants', () => {
-  it('scans more than the original 14 channels', () => {
-    expect(MANUAL_SCAN_CHANNELS.length).toBeGreaterThan(14)
+  it('scans exactly 13 channels (network telemetry channels were dropped)', () => {
+    expect(MANUAL_SCAN_CHANNELS).toHaveLength(13)
   })
   it('never scans the raw DOMSnapshot string table', () => {
     expect(MANUAL_SCAN_CHANNELS).not.toContain('dom_snapshot_content')

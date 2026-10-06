@@ -81,6 +81,13 @@ export async function startBackend(): Promise<void> {
   child.stdout?.on('data', (buf: Buffer) => process.stdout.write(`[backend] ${buf}`))
   child.stderr?.on('data', (buf: Buffer) => process.stderr.write(`[backend] ${buf}`))
 
+  // Without a listener a failed spawn (e.g. the entry file is missing) is an unhandled 'error'
+  // event, which takes the whole main process down instead of degrading to "backend not reachable".
+  child.on('error', (error) => {
+    console.warn('[backend] failed to start:', error)
+    child = null
+  })
+
   child.on('exit', (code, signal) => {
     if (!stopping) {
       console.warn(`[backend] exited unexpectedly (code=${code ?? 'null'}, signal=${signal ?? 'null'})`)

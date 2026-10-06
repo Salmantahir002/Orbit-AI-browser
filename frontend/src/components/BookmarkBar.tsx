@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, type MouseEvent } from 'react'
+import { memo, useState, useRef, useEffect, useCallback, type MouseEvent } from 'react'
 import type { BookmarkItem } from '../types/bookmarkTypes'
 import { getFaviconCandidates, resolveNavigationUrl } from '../services/urlUtils'
 
@@ -81,7 +81,9 @@ function BookmarkFavicon({ url, favicon }: { url: string; favicon?: string }) {
   return <BookmarkFaviconContent key={`${url}::${favicon || ''}`} url={url} favicon={favicon} />
 }
 
-export function BookmarkBar({
+// Memoized: the shell re-renders for tab loading/title/favicon changes and sidebar drags, and the
+// bar's props (all stable callbacks plus the bookmark list) do not change with any of them.
+export const BookmarkBar = memo(function BookmarkBar({
   bookmarks,
   currentUrl,
   currentTitle,
@@ -419,4 +421,4 @@ export function BookmarkBar({
       ) : null}
     </div>
   )
-}
+})

@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, session, WebContentsView } from 'electron'
-import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
+import type { IpcMainEvent, IpcMainInvokeEvent, WebContents } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applyElectronSecurityConfig } from './electronSecurityConfig.js'
@@ -69,6 +69,55 @@ function sendTabEvent(webContentsId: number, payload: Record<string, unknown>) {
 /** Wires a freshly created guest view into the same sensors a `<webview>` used to attach on `did-attach-webview`. */
 function attachGuestBehaviour(view: WebContentsView) {
   const contents = view.webContents
+  contents.setWindowOpenHandler(({ url, disposition, referrer, postBody }) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return { action: 'deny' }
+    const hostWindow = mainWindow
+    return {
+      action: 'allow',
+      outlivesOpener: true,
+      overrideBrowserWindowOptions: {
+        webPreferences: {
+          session: contents.session,
+          nodeIntegration: false,
+          contextIsolation: true,
+          sandbox: true,
+          webviewTag: false,
+        },
+      },
+      createWindow: (options) => {
+        // Electron may create the child WebContents before calling us. Its identity
+        // must be preserved or window.open throws "Invalid webContents".
+        const suppliedContents = (options as typeof options & { webContents?: WebContents }).webContents
+        const popupView = new WebContentsView({
+          webContents: suppliedContents,
+          webPreferences: options.webPreferences,
+        })
+        hostWindow.contentView.addChildView(popupView)
+        popupView.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+        const popupId = popupView.webContents.id
+        tabViews.set(popupId, popupView)
+        attachGuestBehaviour(popupView)
+        popupView.webContents.once('destroyed', () => {
+          if (!tabViews.delete(popupId)) return
+          if (!hostWindow.isDestroyed()) {
+            hostWindow.contentView.removeChildView(popupView)
+            hostWindow.webContents.send('browser:popup-closed', popupId)
+          }
+        })
+        hostWindow.webContents.send('browser:popup-tab', { webContentsId: popupId, url, disposition })
+        if (!suppliedContents) {
+          const contentType = postBody?.boundary
+            ? `${postBody.contentType}; boundary=${postBody.boundary}`
+            : postBody?.contentType
+          popupView.webContents.loadURL(url, {
+            httpReferrer: referrer,
+            ...(postBody && { postData: postBody.data, extraHeaders: `content-type: ${contentType}` }),
+          }).catch((error) => console.warn('[main] Popup tab loadURL failed:', error))
+        }
+        return popupView.webContents
+      },
+    }
+  })
   // Electron's guest content has no native context menu of its own; this is
   // what supplies the Chrome-equivalent Back/Reload/Inspect/Console menu.
   attachWebviewContextMenu(contents, mainWindow as BrowserWindow)
@@ -90,7 +139,6 @@ function attachGuestBehaviour(view: WebContentsView) {
   contents.on('did-start-loading', () => sendTabEvent(id, { type: 'did-start-loading' }))
   contents.on('did-stop-loading', () => sendTabEvent(id, { type: 'did-stop-loading' }))
   contents.on('did-finish-load', () => sendTabEvent(id, { type: 'did-finish-load' }))
-  contents.on('dom-ready', () => sendTabEvent(id, { type: 'dom-ready' }))
   contents.on('did-navigate', (_event, url) => sendTabEvent(id, { type: 'did-navigate', url }))
   contents.on('did-navigate-in-page', (_event, url) => sendTabEvent(id, { type: 'did-navigate-in-page', url }))
   contents.on('page-favicon-updated', (_event, favicons) => {
@@ -159,7 +207,6 @@ async function createWindow() {
   })
 }
 
-ipcMain.handle('app:get-version', () => app.getVersion())
 ipcMain.handle('security:scan-webview', (event, webContentsId: unknown) => {
   if (!mainWindow || event.sender.id !== mainWindow.webContents.id || !Number.isInteger(webContentsId)) {
     return null
@@ -178,13 +225,17 @@ ipcMain.handle('browser:create-tab', (event, url: unknown) => {
   const view = new WebContentsView({ webPreferences: { contextIsolation: true, sandbox: true } })
   mainWindow.contentView.addChildView(view)
   view.setBounds({ x: 0, y: 0, width: 0, height: 0 }) // invisible until the renderer reports real bounds
-  tabViews.set(view.webContents.id, view)
+  const viewId = view.webContents.id
+  tabViews.set(viewId, view)
   attachGuestBehaviour(view)
   view.webContents.loadURL(url).catch((err) => {
+    // close-tab drops the view from tabViews first, so a tab closed before its first load settled
+    // is an aborted load, not a failure.
+    if (!tabViews.has(viewId)) return
     console.warn('[main] Initial tab loadURL failed:', err)
   })
 
-  return { webContentsId: view.webContents.id }
+  return { webContentsId: viewId }
 })
 
 ipcMain.handle('browser:close-tab', (event, webContentsId: unknown) => {
@@ -193,6 +244,12 @@ ipcMain.handle('browser:close-tab', (event, webContentsId: unknown) => {
   mainWindow.contentView.removeChildView(view)
   tabViews.delete(webContentsId as number)
   if (!view.webContents.isDestroyed()) view.webContents.close()
+})
+
+ipcMain.handle('browser:get-tab-info', (event, webContentsId: unknown) => {
+  const view = requireTabView(event, webContentsId)
+  if (!view || view.webContents.isDestroyed()) return null
+  return { url: view.webContents.getURL(), title: view.webContents.getTitle() }
 })
 
 ipcMain.handle('browser:navigate', async (event, webContentsId: unknown, url: unknown) => {
@@ -226,12 +283,6 @@ ipcMain.handle('browser:stop', (event, webContentsId: unknown) => {
   requireTabView(event, webContentsId)?.webContents.stop()
 })
 
-
-ipcMain.handle('browser:execute-javascript', (event, webContentsId: unknown, code: unknown) => {
-  const view = requireTabView(event, webContentsId)
-  if (!view || typeof code !== 'string') return null
-  return view.webContents.executeJavaScript(code)
-})
 
 // setBounds fires on every resize/tab-switch — a fire-and-forget `send`
 // avoids an IPC round trip on that hot path.
@@ -293,17 +344,19 @@ ipcMain.handle('providers:get-active', () => {
 })
 
 app.whenReady().then(async () => {
-  // Packaged / e2e runs have no concurrently wrapper — bring the backend up here.
-  await startBackend()
+  // Packaged / e2e runs have no concurrently wrapper — bring the backend up here. The window
+  // does not wait for it: nothing on the welcome screen needs the backend, and every
+  // backend-dependent action already fails closed with a "not reachable" error until it is up.
+  const backendReady = startBackend()
 
   await createWindow()
 
-  // Sync saved active provider to the Node backend in the background
-  setTimeout(() => {
-    providerSecureStore.syncWithBackend().catch((err) => {
+  // Push the saved active provider to the backend as soon as it answers /health.
+  backendReady
+    .then(() => providerSecureStore.syncWithBackend())
+    .catch((err) => {
       console.warn('[main] Initial provider backend sync failed:', err)
     })
-  }, 1000)
 
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) {

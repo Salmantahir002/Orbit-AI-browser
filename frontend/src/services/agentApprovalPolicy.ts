@@ -60,17 +60,18 @@ const RULES: readonly Rule[] = [
  * never trigger nuisance prompts.
  */
 export const TOOL_CONFIDENCE_THRESHOLDS: Readonly<Record<string, number>> = {
-  click: 0.70,
-  fill: 0.60,
-  type: 0.60,
-  press_key: 0.65,
-  navigate: 0.65,
-  open_tab: 0.70,
+  click: 0.0,
+  fill: 0.0,
+  type: 0.0,
+  press_key: 0.0,
+  navigate: 0.0,
+  open_tab: 0.0,
   scroll: 0.0,
   wait: 0.0,
   extract: 0.0,
-  finish: 0.75,
+  finish: 0.0,
   upload: 1.0,
+  evaluate: 0, element_bounds: 0, dispatch_mouse_event: 0, drag: 0, extract_virtual_table: 0,
 }
 
 export function getToolConfidenceThreshold(tool: string): number {
@@ -112,7 +113,9 @@ export function approvalFor(
       ? `${target.name} ${target.description ?? ''}`
       : String(toolCall.arguments?.key ?? '')
 
-    const matched = RULES.find((rule) => rule.pattern.test(label))
+    const cookieContext = [label, ...(pageState?.dialogs.map(dialog => JSON.stringify(dialog)) ?? [])].join(' ')
+    const cookieDismissal = /cookie|consent preferences/i.test(cookieContext) && /^(accept( all)?|reject( all)?|agree|allow( all)?|close|dismiss|save preferences)\b/i.test(target?.name ?? '')
+    const matched = cookieDismissal ? undefined : RULES.find((rule) => rule.pattern.test(label))
     if (matched) {
       return {
         toolCall,

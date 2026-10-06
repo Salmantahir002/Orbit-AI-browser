@@ -1,0 +1,23 @@
+.agent-mode .agent-result-json {
+  margin: 10px 0;
+  padding: 12px;
+  max-width: 100%;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+  tab-size: 2;
+  border: 1px solid rgba(172, 195, 209, .16);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, .18);
+  color: #e5e9ed;
+  font: 12px/1.65 Consolas, 'Courier New', monospace;
+  text-align: left;
+  cursor: text;
+  user-select: text;
+}
+
+.agent-mode .agent-result-json code { font: inherit; color: inherit; white-space: inherit; }
+.agent-mode .agent-result-json--expanded { max-height: none; }
+.agent-mode .agent-result-json:focus-visible { outline: 2px solid #a8c7fa; outline-offset: 2px; }

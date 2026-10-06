@@ -43,7 +43,8 @@ export class CdpSession {
       session.emit(method, (params ?? {}) as CdpParams)
     })
     contents.debugger.on('detach', (_event, reason) => {
-      console.warn(`[cdp] Detached from target ${contents.id}: ${reason}`)
+      // "target closed" is an ordinary tab close, not something to warn about.
+      if (reason !== 'target closed') console.warn(`[cdp] Detached from target ${contents.id}: ${reason}`)
       if (!contents.isDestroyed()) {
         setTimeout(() => {
           void session.ensureAttached().catch(() => undefined)
@@ -139,6 +140,8 @@ export class CdpSession {
         await this.send(`${domain}.enable`, params[domain])
         this.enabledDomains.add(domain)
       } catch (error) {
+        // A tab closed while its domains were still being enabled has nothing left to enable.
+        if (this.contents.isDestroyed() || (error instanceof Error && /target closed/i.test(error.message))) return
         console.warn(`[cdp] ${domain}.enable failed on target ${this.targetId}:`, error)
       }
     }))

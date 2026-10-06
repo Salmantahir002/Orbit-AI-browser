@@ -15,8 +15,7 @@ import type { AnalysisDetails, ChunkResult } from '../schemas/analysisDetails.sc
 import { ErrorResponseSchema } from '../schemas/common.js'
 
 // The original 14 DOM/accessibility/network channels (ported verbatim from
-// security_routes.py's MANUAL_SCAN_CHANNELS — must stay identical to Phase 3's
-// Node port of AGENT_SCAN_CHANNELS, exactly as the Python pair does today).
+// security_routes.py's MANUAL_SCAN_CHANNELS).
 const CORE_CHANNELS = [
   'visible_text',
   'hidden_text',

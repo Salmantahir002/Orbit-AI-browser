@@ -146,9 +146,77 @@ describe('prompt shape', () => {
   it('the system prompt includes the search and input guidelines', () => {
     const messages = agentPlannerService.buildMessages('search for grok bot', { goal: 'search' }, sampleState())
     const systemPrompt = messages[0]!.content
-    expect(systemPrompt).toContain('CROSS-WEBSITE AUTOMATION GUIDELINES')
-    expect(systemPrompt).toContain('NEVER click a search button while the search box is empty')
+    expect(systemPrompt).toContain('PAGE INTERACTION')
+    expect(systemPrompt).toContain('Fill the editable searchbox/textbox before submitting')
     expect(systemPrompt).toContain('press_key')
+  })
+})
+
+describe('session memory', () => {
+  it('parses the progress checklist, normalising statuses', () => {
+    const [, , , , progress] = agentPlannerService.parsePlan(
+      '{"progress":[{"step":"Open Google Docs","status":"done"},{"step":"Type letter","status":"in progress"},' +
+        '{"step":"Download","status":"completed"},"Verify file",{"nope":1}],"actions":[{"tool":"wait","arguments":{}}]}',
+      KNOWN_IDS,
+    )
+    expect(progress).toEqual([
+      { step: 'Open Google Docs', status: 'done' },
+      { step: 'Type letter', status: 'in_progress' },
+      { step: 'Download', status: 'done' },
+      { step: 'Verify file', status: 'todo' },
+    ])
+  })
+
+  it('a missing or malformed checklist does not reject the plan', () => {
+    const [actions, , , , progress] = agentPlannerService.parsePlan('{"progress":"soon","tool":"wait"}', KNOWN_IDS)
+    expect(actions).toHaveLength(1)
+    expect(progress).toBeUndefined()
+  })
+
+  it('renders progress, milestones, entered content and prior tasks ahead of the step log', () => {
+    const memory: AgentWorkingMemory = {
+      goal: 'write a letter',
+      step_number: 7,
+      completed_steps: [{ tool: 'click', summary: 'clicked File', succeeded: true, step: 7 }],
+      plan_progress: [
+        { step: 'Create blank document', status: 'done' },
+        { step: 'Type the application', status: 'done' },
+        { step: 'Download as .docx', status: 'in_progress' },
+      ],
+      milestones: ['[step 3] Opened https://docs.google.com/document/create'],
+      content_entered: [
+        {
+          step: 5,
+          tool: 'type',
+          page: 'https://docs.google.com/document/d/abc/edit',
+          chars: 1200,
+          head: 'To: The Registrar, Alhamd Islamic University',
+          tail: '…Yours sincerely, [Student Name]',
+          status: 'unverifiable',
+        },
+      ],
+      session_history: [
+        { goal: 'open gmail', status: 'completed', outcome: 'Gmail opened', milestones: [], finalUrl: 'https://mail.google.com/' },
+      ],
+    }
+    const userPrompt = agentPlannerService.buildMessages('write a letter', memory, sampleState())[1]!.content
+
+    expect(userPrompt).toContain('STEP 8')
+    expect(userPrompt).toContain('[in_progress] Download as .docx')
+    expect(userPrompt).toContain('Opened https://docs.google.com/document/create')
+    expect(userPrompt).toContain('CONTENT ALREADY ENTERED')
+    expect(userPrompt).toContain('To: The Registrar, Alhamd Islamic University')
+    expect(userPrompt).toContain('editor hides its content')
+    expect(userPrompt).toContain('PREVIOUS TASKS IN THIS SESSION')
+    expect(userPrompt).not.toContain('this is the first step')
+    expect(userPrompt.indexOf('CONTENT ALREADY ENTERED')).toBeLessThan(userPrompt.indexOf('recent actions:'))
+  })
+
+  it('the system prompt tells the planner not to re-type entered content', () => {
+    const systemPrompt = agentPlannerService.buildMessages('x', { goal: 'x' }, sampleState())[0]!.content
+    expect(systemPrompt).toContain('SESSION MEMORY')
+    expect(systemPrompt).toContain('NEVER type, re-type, rewrite')
+    expect(systemPrompt).toContain('"progress"')
   })
 })
 

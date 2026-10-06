@@ -15,6 +15,7 @@ import {
   AgentPlanRequestSchema,
   AgentPlanResponseSchema,
   type AgentPlanRequest,
+  type AgentProgressItem,
 } from '../schemas/agent.schemas.js'
 import { ErrorResponseSchema } from '../schemas/common.js'
 
@@ -56,8 +57,9 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       let confidence: number
       let reason: string
       let thought: string | undefined
+      let progress: AgentProgressItem[] | undefined
       try {
-        ;[actions, confidence, reason, thought] = await agentPlannerService.requestPlan(goal, memory, pageState)
+        ;[actions, confidence, reason, thought, progress] = await agentPlannerService.requestPlan(goal, memory, pageState)
       } catch (exc) {
         if (exc instanceof ToolValidationError) {
           // The model produced something we will not execute. Surfaced as 422
@@ -83,6 +85,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
         needs_user_confirmation: confidence < settings.AGENT_MIN_CONFIDENCE,
         reason,
         thought,
+        progress,
         model: agentPlannerService.model,
         planner_mode: 'llm' as const,
       }

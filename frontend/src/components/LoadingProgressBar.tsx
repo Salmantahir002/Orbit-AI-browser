@@ -93,7 +93,9 @@ export function LoadingProgressBar({ isLoading }: LoadingProgressBarProps) {
       <div
         className={`loading-progress-bar ${!isLoading ? 'loading-progress-bar--complete' : ''}`}
         style={{
-          width: `${progress}%`,
+          // transform, not width: scaling is composited, whereas animating width re-lays-out and
+          // repaints the toolbar strip for as long as the page is loading.
+          transform: `scaleX(${progress / 100})`,
           opacity: visible ? 1 : 0,
         }}
       />
