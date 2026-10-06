@@ -48,6 +48,15 @@ const electronAPI = {
       ipcRenderer.on('browser:popup-closed', handler)
       return () => ipcRenderer.removeListener('browser:popup-closed', handler)
     },
+    // Blocks the user's own input on a tab while the agent drives it.
+    setAgentLock: (webContentsId: number, locked: boolean) =>
+      ipcRenderer.invoke('browser:set-agent-lock', webContentsId, locked) as Promise<boolean>,
+    // The user pressed Stop in a locked tab's "agent mode is active" toast.
+    onAgentStopRequested: (listener: (webContentsId: number) => void) => {
+      const handler = (_event: IpcRendererEvent, webContentsId: number) => listener(webContentsId)
+      ipcRenderer.on('agent:stop-requested', handler)
+      return () => ipcRenderer.removeListener('agent:stop-requested', handler)
+    },
   },
   // Secure Provider Storage APIs
   providers: {

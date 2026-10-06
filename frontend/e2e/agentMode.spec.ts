@@ -395,6 +395,110 @@ test.describe('Browser Runtime over real CDP', () => {
     expect(filled.data.verification.reason).toContain('did not reach the field')
   })
 
+  type ShieldInfo = { tabBounds: Rectangle; shieldBounds: Rectangle | null; shieldOnTop: boolean; shieldId: number | null }
+  type Rectangle = { x: number; y: number; width: number; height: number }
+
+  async function setLock(targetId: number, locked: boolean): Promise<boolean> {
+    return await window.evaluate(
+      ([id, value]) => window.electronAPI!.browser.setAgentLock(id as number, value as boolean),
+      [targetId, locked] as const,
+    )
+  }
+
+  /** Reads, from main, the tab's view and the shield stacked over it. */
+  async function shieldInfo(targetId: number): Promise<ShieldInfo> {
+    return await app.evaluate(({ BrowserWindow }, id) => {
+      const children = BrowserWindow.getAllWindows()[0].contentView.children as unknown as {
+        webContents?: { id: number; getURL: () => string }
+        getBounds: () => { x: number; y: number; width: number; height: number }
+      }[]
+      const tab = children.find((child) => child.webContents?.id === id)!
+      const shieldIndex = children.findIndex((child) => child.webContents?.getURL().includes('Agent%20mode%20active'))
+      const shield = shieldIndex === -1 ? null : children[shieldIndex]
+      return {
+        tabBounds: tab.getBounds(),
+        shieldBounds: shield ? shield.getBounds() : null,
+        shieldOnTop: shieldIndex === children.length - 1,
+        shieldId: shield?.webContents?.id ?? null,
+      }
+    }, targetId)
+  }
+
+  async function shieldScript(shieldId: number, script: string): Promise<unknown> {
+    return await app.evaluate(
+      ({ webContents }, [id, code]) => webContents.fromId(id as number)!.executeJavaScript(code as string),
+      [shieldId, script] as const,
+    )
+  }
+
+  test('agent lock stacks an input shield exactly over the tab and removes it on unlock', async () => {
+    const targetId = await loadTestPage()
+    expect(await setLock(targetId, true)).toBe(true)
+
+    // The shield is identified by its page URL, which commits a moment after the lock.
+    await expect.poll(async () => (await shieldInfo(targetId)).shieldId).not.toBeNull()
+    const locked = await shieldInfo(targetId)
+    expect(locked.shieldBounds).toEqual(locked.tabBounds)
+    expect(locked.tabBounds.width).toBeGreaterThan(0)
+    expect(locked.shieldOnTop).toBe(true)
+
+    expect(await setLock(targetId, false)).toBe(true)
+    expect((await shieldInfo(targetId)).shieldBounds).toBeNull()
+  })
+
+  test('the agent still drives a locked tab', async () => {
+    const targetId = await loadTestPage()
+    await setLock(targetId, true)
+    try {
+      let state = await invoke<{ elements: { id: string; role: string; name: string }[] }>(targetId, 'extractPageState')
+      if (!state.ok) throw new Error('state extraction failed')
+      const field = state.data.elements.find((element) => /searchbox|textbox|combobox/.test(element.role))!
+      const filled = await invoke<{ verification: { verified: boolean; reason: string } }>(
+        targetId, 'fill', { elementId: field.id, value: 'locked shoes' },
+      )
+      expect(filled.ok).toBe(true)
+      if (!filled.ok) return
+      expect(filled.data.verification.verified, filled.data.verification.reason).toBe(true)
+
+      state = await invoke<{ elements: { id: string; role: string; name: string }[] }>(targetId, 'extractPageState')
+      if (!state.ok) throw new Error('state extraction failed')
+      const button = state.data.elements.find((element) => element.name.includes('Run search'))!
+      expect((await invoke(targetId, 'click', { elementId: button.id })).ok).toBe(true)
+
+      const output = await app.evaluate(
+        ({ webContents }, id) => webContents.fromId(id)!.executeJavaScript('document.getElementById("out").textContent'),
+        targetId,
+      )
+      expect(output).toBe('clicked:locked shoes')
+    } finally {
+      await setLock(targetId, false)
+    }
+  })
+
+  test('user input on a locked tab shows the agent-mode toast, and its Stop releases the lock', async () => {
+    const targetId = await loadTestPage()
+    await setLock(targetId, true)
+    await expect.poll(async () => (await shieldInfo(targetId)).shieldId).not.toBeNull()
+    const { shieldId } = await shieldInfo(targetId)
+
+    await expect.poll(() => shieldScript(shieldId!, 'document.readyState')).toBe('complete')
+    expect(await shieldScript(shieldId!, 'document.getElementById("toast").classList.contains("visible")')).toBe(false)
+
+    // A real input event delivered to the shield, as the user's click would be.
+    await app.evaluate(({ webContents }, id) => {
+      const contents = webContents.fromId(id)!
+      contents.sendInputEvent({ type: 'mouseDown', x: 120, y: 120, button: 'left', clickCount: 1 })
+      contents.sendInputEvent({ type: 'mouseUp', x: 120, y: 120, button: 'left', clickCount: 1 })
+    }, shieldId!)
+
+    await expect.poll(() => shieldScript(shieldId!, 'document.getElementById("toast").classList.contains("visible")')).toBe(true)
+    expect(await shieldScript(shieldId!, 'document.getElementById("toast").textContent')).toContain('Agent mode is active')
+
+    // No task is running here, so Stop releases the lock it finds.
+    await shieldScript(shieldId!, 'document.getElementById("stop").click()')
+    await expect.poll(async () => (await shieldInfo(targetId)).shieldBounds).toBeNull()
+  })
+
   test('reports a stale element id rather than clicking the wrong node', async () => {
     const targetId = await loadTestPage()
     const stale = await invoke(targetId, 'click', { elementId: 'e9999' })

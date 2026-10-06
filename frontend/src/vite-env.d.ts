@@ -30,6 +30,8 @@ interface Window {
       onTabEvent: (listener: (event: BrowserTabEvent) => void) => () => void
       onPopupTab: (listener: (event: { webContentsId: number; url: string; disposition: string }) => void) => () => void
       onPopupClosed: (listener: (webContentsId: number) => void) => () => void
+      setAgentLock: (webContentsId: number, locked: boolean) => Promise<boolean>
+      onAgentStopRequested: (listener: (webContentsId: number) => void) => () => void
     }
   }
 }

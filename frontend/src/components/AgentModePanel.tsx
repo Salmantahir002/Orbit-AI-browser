@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useId, type FormEvent } from 'react'
 import { AgentTask } from '../services/agentRuntimeCore'
+import { setAgentInputLock } from '../services/browserRuntime'
 import type { ApprovalRequest } from '../services/agentApprovalPolicy'
 import type { AgentTaskResult } from '../types/agentTypes'
 import { PromptModelPicker } from './PromptModelPicker'
@@ -79,6 +80,22 @@ export function AgentModePanel({ targetId, currentUrl, onOpenTab, onOpenSettings
     approvalResolverRef.current?.(granted)
   }, [])
 
+  const stopTask = useCallback(() => {
+    abortRef.current?.abort()
+    approvalResolverRef.current?.(false)
+    setIsPlanning(false)
+    setStatus('Stopping…')
+  }, [])
+
+  // Stop pressed in a locked tab's "agent mode is active" toast. With no task
+  // running there is nothing to stop, so the stale lock is simply released.
+  useEffect(() => {
+    return window.electronAPI?.browser.onAgentStopRequested((tabId) => {
+      if (abortRef.current) stopTask()
+      else void setAgentInputLock(tabId, false)
+    })
+  }, [stopTask])
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const trimmedGoal = goal.trim()
@@ -144,12 +161,7 @@ export function AgentModePanel({ targetId, currentUrl, onOpenTab, onOpenSettings
     }
   }
 
-  function handleStop() {
-    abortRef.current?.abort()
-    approvalResolverRef.current?.(false)
-    setIsPlanning(false)
-    setStatus('Stopping…')
-  }
+  const handleStop = stopTask
 
   const hasPage = Boolean(currentUrl) && currentUrl !== 'about:blank'
 

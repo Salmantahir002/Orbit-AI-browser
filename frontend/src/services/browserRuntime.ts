@@ -121,3 +121,16 @@ export function waitForDomStable(targetId: number, params: WaitParams = {}) {
 export function setAgentOverlay(targetId: number, active: boolean) {
   return invokeRuntime(targetId, 'setAgentOverlay', { active })
 }
+
+/**
+ * Locks a tab against the user's own mouse and keyboard while the agent drives
+ * it, or releases it. The agent's own input is unaffected. Resolves false
+ * (never throws) outside Electron or for an unknown tab.
+ */
+export async function setAgentInputLock(targetId: number, locked: boolean): Promise<boolean> {
+  try {
+    return (await window.electronAPI?.browser.setAgentLock(targetId, locked)) ?? false
+  } catch {
+    return false
+  }
+}

@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applyElectronSecurityConfig } from './electronSecurityConfig.js'
 import { attachWebviewContextMenu } from './webviewContextMenu.js'
+import { AgentInputShield } from './agentInputShield.js'
 import { startBackend, stopBackend } from './backendProcess.js'
 import { CdpInspectionService } from './cdpInspectionService.js'
 import {
@@ -54,6 +55,12 @@ const browserRuntime = new BrowserRuntime(
 // runtime IPC — already addresses a tab by). The renderer never holds a
 // reference to the guest content itself, only this id.
 const tabViews = new Map<number, WebContentsView>()
+
+// Blocks the user's own input on a tab while the agent drives it. Stop in the
+// shield's toast is forwarded to the renderer, which owns the running task.
+const agentInputShield = new AgentInputShield((tabId) => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('agent:stop-requested', tabId)
+})
 
 function requireTabView(event: IpcMainInvokeEvent | IpcMainEvent, webContentsId: unknown): WebContentsView | null {
   if (!mainWindow || event.sender.id !== mainWindow.webContents.id || !Number.isInteger(webContentsId)) {
@@ -187,6 +194,12 @@ async function createWindow() {
       item.cancel()
     }
   })
+  // A reloaded or crashed shell has lost the task that would unlock its tabs.
+  mainWindow.webContents.on('did-start-navigation', (details) => {
+    if (details.isMainFrame && !details.isSameDocument) agentInputShield.unlockAll()
+  })
+  mainWindow.webContents.on('render-process-gone', () => agentInputShield.unlockAll())
+  mainWindow.on('closed', () => agentInputShield.unlockAll())
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedUrl) => {
     console.error(`[renderer-load-failed] ${errorCode} ${errorDescription} ${validatedUrl}`)
   })
@@ -241,6 +254,7 @@ ipcMain.handle('browser:create-tab', (event, url: unknown) => {
 ipcMain.handle('browser:close-tab', (event, webContentsId: unknown) => {
   const view = requireTabView(event, webContentsId)
   if (!view || !mainWindow) return
+  agentInputShield.unlock(webContentsId as number)
   mainWindow.contentView.removeChildView(view)
   tabViews.delete(webContentsId as number)
   if (!view.webContents.isDestroyed()) view.webContents.close()
@@ -296,6 +310,17 @@ ipcMain.on('browser:set-bounds', (event, webContentsId: unknown, bounds: unknown
     width: Math.max(0, Math.round(rect.width)),
     height: Math.max(0, Math.round(rect.height)),
   })
+  agentInputShield.syncBounds(webContentsId as number, view.getBounds())
+})
+
+// Agent mode locks the tab it drives against the user's own mouse and keyboard
+// for the duration of a task (see agentInputShield.ts).
+ipcMain.handle('browser:set-agent-lock', (event, webContentsId: unknown, locked: unknown) => {
+  const view = requireTabView(event, webContentsId)
+  if (!view || !mainWindow || typeof locked !== 'boolean') return false
+  if (locked) agentInputShield.lock(webContentsId as number, view, mainWindow)
+  else agentInputShield.unlock(webContentsId as number)
+  return true
 })
 
 // Sole entry point for agent-driven browser actions. The manual scan channel

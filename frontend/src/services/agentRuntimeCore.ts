@@ -8,7 +8,7 @@ import type { PageStateSnapshot } from '../types/browserRuntimeTypes'
 import { approvalFor, type ApprovalHandler } from './agentApprovalPolicy'
 import { AgentWorkingMemory, CONTENT_MIN_CHARS, documentKey } from './agentWorkingMemory'
 import { AgentPlanError, requestPlan } from './agentApiClient'
-import { extractPageState, invokeRuntime, isBrowserRuntimeAvailable, setAgentOverlay } from './browserRuntime'
+import { extractPageState, invokeRuntime, isBrowserRuntimeAvailable, setAgentInputLock, setAgentOverlay } from './browserRuntime'
 import { isTerminalTool, resolveToolCall } from './agentToolRegistry'
 import { agentBrowserMemory } from './agentBrowserMemory'
 import { agentSessionMemory } from './agentSessionMemory'
@@ -210,6 +210,9 @@ export class AgentTask {
       return this.finalResult('failed', 'Browser runtime is not available in this environment.')
     }
 
+    // The user's own mouse and keyboard are locked out of the tab for the
+    // whole task, so a stray click cannot undo what the agent just did.
+    await setAgentInputLock(this.targetId, true)
     if (this.visualFeedback) {
       await setAgentOverlay(this.targetId, true).catch(() => undefined)
     }
@@ -273,6 +276,7 @@ export class AgentTask {
 
       return this.finalResult('failed', `Stopped after reaching the ${this.maxSteps}-step limit.`, 'step_limit')
     } finally {
+      await setAgentInputLock(this.targetId, false)
       if (this.visualFeedback) {
         await setAgentOverlay(this.targetId, false).catch(() => undefined)
       }
@@ -628,7 +632,10 @@ export class AgentTask {
       return null
     }
 
+    // The lock follows the agent to the tab it now drives.
+    await setAgentInputLock(this.targetId, false)
     this.targetId = newTargetId
+    await setAgentInputLock(this.targetId, true)
     this.memory.recordStep('open_tab', `Opened a new tab${url ? ` at ${url}` : ''}.`, true)
     this.memory.recordMilestone(`Opened a new tab${url ? ` at ${url}` : ''} and switched to it`)
     this.memory.resetRetries()
