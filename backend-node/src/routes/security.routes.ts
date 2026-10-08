@@ -4,11 +4,15 @@ import { featureExplanationService } from '../services/featureExplanationService
 import { preprocessingService } from '../services/promptPreprocessingService.js'
 import { promptClassifier } from '../services/promptClassifierService.js'
 import { securityEventStore } from '../services/securityEventStore.js'
+import { explainScan } from '../services/scanSummaryService.js'
 import { chunkingService } from '../services/textChunkingService.js'
 import {
+  ExplainScanRequestSchema,
   PromptCheckRequestSchema,
+  ScanSummaryResponseSchema,
   SecurityCheckResponseSchema,
   WebpageCheckRequestSchema,
+  type ExplainScanRequest,
   type SecurityCheckResponse,
 } from '../schemas/security.schemas.js'
 import type { AnalysisDetails, ChunkResult } from '../schemas/analysisDetails.schemas.js'
@@ -87,6 +91,39 @@ function chunkReason(
   return 'Chunk does not contain suspicious override, reveal, hidden instruction, or exfiltration intent.'
 }
 
+// A chunk is up to 800 chars and an HTML-comment channel is often a single
+// chunk holding several unrelated comments. With no keyword to centre on, the
+// excerpt used to be the chunk's first 240 chars, which showed the user a
+// harmless neighbour of the real payload. Re-scoring the chunk piece by piece
+// finds the passage the model actually reacted to.
+const MAX_FOCUSED_EXCERPT_CHARS = 400
+
+async function locateFlaggedPassages(texts: readonly string[]): Promise<string[]> {
+  const pieces = texts.map((text) =>
+    text.split(/(?<=[.!?])\s+|-->|<!--|\n+/).map((piece) => piece.trim()).filter((piece) => piece.length >= 20),
+  )
+  const flat = pieces.flat()
+  if (flat.length === 0) return texts.map(() => '')
+
+  try {
+    const results = await promptClassifier.classifyMany(flat)
+    let offset = 0
+    return pieces.map((group) => {
+      const scored = group.map((piece, index) => {
+        const result = results[offset + index]!
+        return { piece, score: result.dl.available ? result.dl.malicious_score : result.confidence }
+      })
+      offset += group.length
+      const best = scored.reduce<{ piece: string; score: number } | null>(
+        (top, item) => (!top || item.score > top.score ? item : top), null)
+      return best ? best.piece.slice(0, MAX_FOCUSED_EXCERPT_CHARS) : ''
+    })
+  } catch {
+    // The excerpt is only a display aid; fall back to the chunk start.
+    return texts.map(() => '')
+  }
+}
+
 export async function analyzeText(
   rawText: string,
   source: 'direct_prompt' | 'webpage_content',
@@ -118,6 +155,11 @@ export async function analyzeText(
   // set as batched forward passes, which is far cheaper than N sequential ones.
   const detectorResults = await promptClassifier.classifyMany(chunks.map((chunk) => chunk.text))
 
+  const modelOnlyIndexes = detectorResults.flatMap((result, index) =>
+    result.is_malicious && Object.keys(result.pattern_evidence).length === 0 ? [index] : [])
+  const focusedPassages = await locateFlaggedPassages(modelOnlyIndexes.map((index) => chunks[index]!.text))
+  const focusedExcerpts = new Map(modelOnlyIndexes.map((chunkIndex, i) => [chunkIndex, focusedPassages[i]!]))
+
   for (const [chunkIndex, chunk] of chunks.entries()) {
     const detectorResult = detectorResults[chunkIndex]!
     const label = detectorResult.is_malicious ? 'malicious' : 'benign'
@@ -140,7 +182,7 @@ export async function analyzeText(
       risk_level: label === 'benign' ? 'low' : riskLevelForConfidence(confidence),
       matched_patterns: matchedPatterns,
       reason: chunkReason(label, matchedPatterns, matchedEvidence),
-      excerpt: excerptForDisplay(chunk.text, matchedEvidence),
+      excerpt: focusedExcerpts.get(chunkIndex) || excerptForDisplay(chunk.text, matchedEvidence),
       matched_evidence: matchedEvidence,
       detector_source: detectorResult.detector_source,
       rule_based: detectorResult.rule_based,
@@ -240,6 +282,10 @@ export default async function securityRoutes(app: FastifyInstance): Promise<void
     const combinedWebpageContent = nonEmptySources.map(([, text]) => text).join('\n')
     return analyzeText(combinedWebpageContent, 'webpage_content', nonEmptySources)
   })
+
+  app.post<{ Body: ExplainScanRequest }>('/security/explain-scan', {
+    schema: { body: ExplainScanRequestSchema, response: { 200: ScanSummaryResponseSchema } },
+  }, async (request) => explainScan(request.body))
 
   app.get('/security/events', async () => securityEventStore.getEvents())
 }

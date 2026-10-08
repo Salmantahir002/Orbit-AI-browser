@@ -39,6 +39,24 @@ export const SecurityCheckResponseSchema = Type.Object({
   analysis_details: AnalysisDetailsSchema,
 })
 
+// The finished scan output (rule-based + DL verdicts per chunk), not the raw page.
+export const ExplainScanRequestSchema = Type.Object({
+  source: Type.Union([Type.Literal('direct_prompt'), Type.Literal('webpage_content')]),
+  url: Type.Optional(Type.String()),
+  page_title: Type.Optional(Type.String()),
+  analysis_details: AnalysisDetailsSchema,
+})
+
+export const ScanSummaryResponseSchema = Type.Object({
+  summary: Type.String(),
+  // `llm`: written by the active provider. `local`: built-in summary (no provider, or it failed).
+  source: Type.Union([Type.Literal('llm'), Type.Literal('local')]),
+  provider: Type.Optional(Type.String()),
+  model: Type.Optional(Type.String()),
+  note: Type.Optional(Type.String()),
+})
+
 export type PromptCheckRequest = Static<typeof PromptCheckRequestSchema>
 export type WebpageCheckRequest = Static<typeof WebpageCheckRequestSchema>
+export type ExplainScanRequest = Static<typeof ExplainScanRequestSchema>
 export type SecurityCheckResponse = Static<typeof SecurityCheckResponseSchema>

@@ -4,7 +4,10 @@ import type {
   WebpageContent,
   ChatHistoryTurn,
   ChatAttachment,
+  ScanSummary,
+  SecuritySource,
 } from '../types/securityTypes'
+import type { AnalysisDetails } from '../types/analysisDetailsTypes'
 
 const API_BASE_URL = 'http://127.0.0.1:8000/api/v1'
 
@@ -52,6 +55,18 @@ export function checkWebpage(content: WebpageContent): Promise<SecurityCheckResp
   return requestJson<SecurityCheckResponse>('/security/check-webpage', {
     method: 'POST',
     body: JSON.stringify(content),
+  })
+}
+
+/** Sends a finished scan's output to the active provider for a plain-language summary. */
+export function explainScan(
+  source: SecuritySource,
+  analysisDetails: AnalysisDetails,
+  page?: Pick<WebpageContent, 'url' | 'page_title'>,
+): Promise<ScanSummary> {
+  return requestJson<ScanSummary>('/security/explain-scan', {
+    method: 'POST',
+    body: JSON.stringify({ source, url: page?.url, page_title: page?.page_title, analysis_details: analysisDetails }),
   })
 }
 

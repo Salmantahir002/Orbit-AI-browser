@@ -1,4 +1,5 @@
 import type { AnalysisDetails, ChunkResult } from '../types/analysisDetailsTypes'
+import { ScanSummarySection } from './ScanSummarySection'
 
 type Props = {
   details: AnalysisDetails | null
@@ -208,6 +209,8 @@ export function PromptAnalysisDetailsPanel({ details, isOpen, onClose }: Props) 
               </div>
             </div>
           </div>
+
+          <ScanSummarySection source="direct_prompt" details={details} />
 
           {/* ── 2. THREAT SIGNALS ─────────────────────────────────────── */}
           {!isSafe || hasSignals ? (

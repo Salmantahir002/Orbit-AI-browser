@@ -47,6 +47,33 @@ const INSTRUCTION_CONTEXT_TERMS = [
 // somewhere else, which silently disabled the guard on every big site.
 const CONTEXT_PROXIMITY_CHARS = 160
 
+// The phrase lists in securityConstants only catch exact wordings, so a trivial
+// rewording ("ignore any higher-priority instructions", "report any session
+// tokens") slipped straight past them. These match the *shape* of each attack:
+// an override verb aimed at instructions, a request to reveal the hidden
+// prompt, an order to hand over secrets, or an order to hide it from the user.
+// Each is specific enough to need both the verb and its target, so ordinary
+// prose that only mentions "rules" or "cookies" does not match.
+const PATTERN_INDICATORS: Record<string, RegExp[]> = {
+  override_instructions: [
+    /\b(?:ignore|disregard|forget|override)\s+(?:(?:any|all|every|the|your|my|these|those|other|previous|prior|earlier|above|higher[- ]priority|system|developer)\s+){1,4}(?:instructions?|directives|guidelines|prompts?|rules)\b/,
+    /\bignore\s+the\s+user(?:'s|\u2019s)?\s+(?:goal|request|task|question)/,
+  ],
+  jailbreak_attempt: [
+    /\byou are now (?:an? )?(?:unrestricted|unfiltered|jailbroken|uncensored)\b/,
+  ],
+  hidden_instruction: [
+    /\bdo not (?:mention|tell|reveal|disclose|show)\s+(?:this|it|that)(?:\s+\w+)?\s+to the user\b/,
+    /\bwithout (?:telling|informing|notifying) the user\b/,
+  ],
+  system_prompt_reveal: [
+    /\breveal\s+(?:(?:any|all|your|the)\s+)?(?:system|developer|hidden|internal)(?:\s*\/\s*\w+)?\s+(?:instructions?|prompts?|messages?)\b/,
+  ],
+  data_exfiltration: [
+    /\b(?:report|send|share|leak|output|print|post|forward|reveal|exfiltrate)\s+(?:(?:any|all|the|your|every)\s+)?(?:session\s+tokens?|api[- ]?keys?|cookies|credentials|passwords?|secrets?|auth(?:orization)?\s+tokens?)\b/,
+  ],
+}
+
 function escapeRegExp(term: string): string {
   return term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -118,6 +145,14 @@ class RuleBasedDetectorService {
 
         matches.push(keyword)
         totalKeywordMatches += 1
+      }
+
+      for (const pattern of PATTERN_INDICATORS[categoryName] ?? []) {
+        const found = pattern.exec(searchText)
+        if (found && !matches.includes(found[0])) {
+          matches.push(found[0])
+          totalKeywordMatches += 1
+        }
       }
 
       if (matches.length > 0) {

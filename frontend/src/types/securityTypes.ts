@@ -20,6 +20,14 @@ export type LlmResponse = {
   usage: Record<string, number>
 }
 
+export type ScanSummary = {
+  summary: string
+  source: 'llm' | 'local'
+  provider?: string
+  model?: string
+  note?: string
+}
+
 export type ChatHistoryTurn = {
   role: 'user' | 'assistant' | 'system'
   content: string

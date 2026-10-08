@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ChunkResult } from '../types/analysisDetailsTypes'
 import type { SecurityCheckResponse, WebpageContent } from '../types/securityTypes'
+import { ScanSummarySection } from './ScanSummarySection'
 
 type Props = {
   content: WebpageContent | null
@@ -108,6 +109,7 @@ function SuspiciousChunk({ chunk }: { chunk: ChunkResult }) {
   )
 }
 
+
 export function WebpageAnalysisDetailsPanel({ content, isOpen, isScanning, result, onClose }: Props) {
   if (!content || (!isScanning && !result)) return null
 
@@ -168,6 +170,8 @@ export function WebpageAnalysisDetailsPanel({ content, isOpen, isScanning, resul
             <strong>{content.page_title || 'Untitled page'}</strong>
             <code>{content.url}</code>
           </div>
+
+          <ScanSummarySection source="webpage_content" details={details} page={content} />
 
           <div className={`webpage-credential-notice ${isBlocked ? 'webpage-credential-notice--blocked' : ''}`}>
             <WarningIcon />
