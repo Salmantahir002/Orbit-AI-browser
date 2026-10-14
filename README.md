@@ -8,7 +8,7 @@
 
 **Orbit** is an AI-native desktop web browser engineered to defend against prompt injection attacks in real time. When an AI assistant browses or reads web content on a user's behalf, malicious actors can weaponize web pages with hidden instructions (Indirect Prompt Injection) or supply hostile prompts (Direct Prompt Injection) to manipulate the model.
 
-Orbit implements a multi-stage security pipeline that inspects both user prompts and live web pages across 22 distinct content channels before text can reach a Large Language Model (LLM) or trigger browser automation.
+Orbit implements a multi-stage security pipeline that inspects both user prompts and live web pages across **13 distinct content channels** (11 core DOM/accessibility channels + 2 extended telemetry channels) before text can reach a Large Language Model (LLM) or trigger browser automation.
 
 The system is built entirely in TypeScript, pairing an Electron desktop shell and React 19 frontend with a high-performance Fastify 5 security service on Node.js.
 
@@ -28,7 +28,7 @@ Orbit partitions responsibilities across four isolated operating system and runt
 │ - Bookmarks toolbar & branding  │                                 │ - CDP Browser Runtime engine       │
 │ - Agent Result modal            │                                 │ - Provider credential vault        │
 │ - Explainability drawers        │                                 │ - Backend process supervisor       │
-│ - Host <div> geometry sync      │                                 │ - Bookmark persistence store       │
+│ - Host <div> geometry sync      │                                 │ - Browser profile & history store  │
 └────────────────┬────────────────┘                                 └─────────────────┬──────────────────┘
                  │                                                                    │ Spawns & supervises
                  │ HTTP (Port 8000)                                                   │ (ELECTRON_RUN_AS_NODE=1)
@@ -38,13 +38,14 @@ Orbit partitions responsibilities across four isolated operating system and runt
 │                          Security Backend Process (Node.js + Fastify 5)                                │
 │                          backend-node/                                                                 │
 │                                                                                                        │
-│ - 22-channel webpage inspection pipeline (14 DOM + 8 telemetry channels)                               │
+│ - 13-channel webpage inspection pipeline (11 DOM/accessibility + 2 telemetry channels)                 │
 │ - Dual-Detector Engine: Regex 5-vector pattern matching + Llama Prompt Guard 2 (22M ONNX in fp32)      │
 │ - 512-token sliding window safeguards preventing truncation evasion                                    │
 │ - Multi-provider LLM gateways (OpenRouter, TokenRouter, Anthropic, Gemini, OpenAI, etc.)               │
 │ - Autonomous agent planning service (/api/v1/agent/plan) with multilingual & Roman Urdu goal support   │
 │ - Fast, decoupled agent execution via native Chromium CDP input events                                 │
 │ - Final guarded chat proxy (/api/v1/llm/chat) with chat history & multimodal attachment support        │
+│ - LLM-powered scan summary service (/api/v1/security/explain-scan) with local fallback                 │
 │ - Audit event logging store for security scans                                                         │
 └────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 
@@ -60,10 +61,10 @@ Orbit partitions responsibilities across four isolated operating system and runt
 
 ### Process Roles
 
-1. **Electron Main Process**: Oversees application lifecycle, creates native windows, securely stores encrypted API keys via Electron `safeStorage`, manages bookmark persistence, supervises the backend process lifecycle (`backendProcess.ts`), and manages guest tabs using modern `WebContentsView`.
+1. **Electron Main Process**: Oversees application lifecycle, creates native windows, securely stores encrypted API keys via Electron `safeStorage`, manages browser profile and history persistence via `BrowserProfileStore`, supervises the backend process lifecycle (`backendProcess.ts`), and manages guest tabs using modern `WebContentsView`. The `BrowserUIController` drives the native overlay architecture (transparent `WebContentsView` browser chrome above guest pages), while `AgentInputShield` blocks user input on a tab while the agent drives it.
 2. **Renderer Process (React 19 UI)**: Drives the browser chrome, navigation toolbar, bookmarks bar, address bar, tabs, and the **Kimo** AI assistant sidebar (Chat and Autonomous Agent modes). Tab surfaces are rendered by tracking container bounds via `ResizeObserver` and synchronizing the native `WebContentsView` position via IPC.
 3. **Guest Web View (`WebContentsView`)**: Runs external websites inside an isolated Chromium sandbox. Unlike legacy `<webview>` tags, `WebContentsView` prevents untrusted web code from accessing internal application DOM, local files, or saved credentials.
-4. **Security Backend (`backend-node`)**: Fastify 5 microservice on loopback port `8000`. Executes 22-channel inspection, Unicode NFKC normalization, text chunking with boundary overlap, sliding token-window safeguards (512 tokens), dual-detector classification (rule-based regex + Llama Prompt Guard 2 22M transformer in fp32), LLM gateway proxying with chat history and multimodal attachment support, and agent action planning.
+4. **Security Backend (`backend-node`)**: Fastify 5 microservice on loopback port `8000`. Executes 13-channel inspection, Unicode NFKC normalization, text chunking with boundary overlap, sliding token-window safeguards (512 tokens), dual-detector classification (rule-based regex + Llama Prompt Guard 2 22M transformer in fp32), LLM-powered scan summarization with local fallback, LLM gateway proxying with chat history and multimodal attachment support, and agent action planning.
 
 ---
 
@@ -71,9 +72,8 @@ Orbit partitions responsibilities across four isolated operating system and runt
 
 ```
 Prompt_injection_defense_in_AI_Native_Browser/
-├── ARCHITECTURE.md                       # Comprehensive architectural specification, security policies, and CDP specs
-├── AGENTS.md                             # Agent development guidelines and Graphify/CodeGraph tool instructions
-├── CLAUDE.md                             # Repository guidance and developer command workflows
+├── README.md                             # This file
+├── architecture.md                       # Comprehensive architectural specification, security policies, and CDP specs
 │
 ├── frontend/                             # Desktop application (Electron + React)
 │   ├── electron/                         # Electron Main & Preload scripts
@@ -81,37 +81,66 @@ Prompt_injection_defense_in_AI_Native_Browser/
 │   │   ├── preload.ts                    # Hardened contextBridge interface (window.electronAPI)
 │   │   ├── backendProcess.ts             # In-process supervision of backend-node
 │   │   ├── providerSecureStore.ts        # Encrypted local API key storage (safeStorage)
-│   │   ├── bookmarkStore.ts              # Local bookmark management and storage
+│   │   ├── browserUIController.ts        # BrowserUIController: native overlay + IPC hub + download tracking
+│   │   ├── browserUITypes.ts             # Shared types: BrowserPanel, BrowserCommand, OverlayState
+│   │   ├── browserProfileStore.ts        # Browser history, bookmarks, and profile persistence store
+│   │   ├── agentInputShield.ts           # Blocks user tab input while the agent is running; routes stop signals
+│   │   ├── electronSecurityConfig.ts     # Electron permission and CSP hardening
 │   │   ├── webviewContextMenu.ts         # Native context menu and DevTools banner
-│   │   ├── cdpInspectionService.ts       # 22-channel snapshot extraction via CDP
+│   │   ├── cdpInspectionService.ts       # 13-channel snapshot extraction via CDP
 │   │   └── browserRuntime/               # Autonomous agent CDP automation engine
 │   │       ├── browserRuntime.ts         # CDP command dispatcher and target manager
 │   │       ├── nativeInput.ts            # Hardware-level mouse and keyboard event dispatch
+│   │       ├── advancedBrowser.ts        # High-level browser actions (scroll, file upload, select)
+│   │       ├── virtualCursor.ts          # Cursor state simulation for precise hardware-event targeting
+│   │       ├── elementResolver.ts        # AXTree node resolver with fallback heuristics
+│   │       ├── fieldProbe.ts             # Input field type detection and fill strategy selector
 │   │       ├── pageInspector.ts          # Accessibility tree (AXTree) parser
 │   │       ├── stateBuilder.ts           # Semantic element extraction for agent planner
 │   │       ├── verificationEngine.ts     # Pre/post action state validation
-│   │       └── waitEngine.ts             # Quiescence and navigation synchronizer
+│   │       ├── waitEngine.ts             # Quiescence and navigation synchronizer
+│   │       ├── runtimeContract.ts        # TypeBox schemas for CDP tool call contracts
+│   │       └── index.ts                  # Public barrel export for the browserRuntime module
 │   ├── src/                              # React 19 UI Application
 │   │   ├── App.tsx                       # Welcome screen; lazy-loads the browser shell on start
 │   │   ├── components/                   # UI components
 │   │   │   ├── BrowserShell.tsx          # Main shell layout, tab manager, drawer state
 │   │   │   ├── BrowserWebView.tsx        # Host container synchronizing WebContentsView bounds
+│   │   │   ├── BrowserOverlay.tsx        # Transparent overlay layer housing the browser chrome UI
 │   │   │   ├── BrowserToolbar.tsx        # Navigation controls, address bar, and Scan Page trigger
 │   │   │   ├── BookmarkBar.tsx           # Full-featured bookmark toolbar
+│   │   │   ├── BrowserLogo.tsx           # Orbit animated logo / favicon component
 │   │   │   ├── AiAssistantSidebar.tsx    # Kimo sidebar (Chat and Agent modes)
 │   │   │   ├── AgentModePanel.tsx        # Autonomous agent task UI with expandable Result Modal
+│   │   │   ├── AgentResultMessage.tsx    # Structured agent result message renderer
 │   │   │   ├── PromptInputBox.tsx        # Universal prompt input with multimodal attachment staging
 │   │   │   ├── PromptModelPicker.tsx     # In-prompt model selection and routing popover
 │   │   │   ├── ProviderSettingsModal.tsx # Multi-provider connection & key configuration
-│   │   │   ├── WebpageAnalysisDetailsPanel.tsx # 22-channel inspection explainability drawer
+│   │   │   ├── ProviderIcons.tsx         # SVG icon set for all supported AI providers
+│   │   │   ├── WebpageAnalysisDetailsPanel.tsx # 13-channel inspection explainability drawer
 │   │   │   ├── PromptAnalysisDetailsPanel.tsx  # Direct prompt analysis explainability drawer
+│   │   │   ├── ScanSummarySection.tsx    # LLM-powered scan narrative summary panel
+│   │   │   ├── ReportDrawer.tsx          # Slide-over drawer shell for detail panels
+│   │   │   ├── MarkdownMessage.tsx       # Safe markdown renderer for chat and agent messages
+│   │   │   ├── LiquidGlass.tsx           # Glassmorphism decorative background component
+│   │   │   ├── GlassSwitch.tsx           # Animated toggle switch with glass styling
+│   │   │   ├── LoadingProgressBar.tsx    # Top-of-page navigation progress bar
 │   │   │   └── KimoMascot.tsx            # Animated Kimo visual identity and mascot
 │   │   ├── services/                     # Frontend client services
 │   │   │   ├── backendApiClient.ts       # HTTP client for backend security & chat endpoints
 │   │   │   ├── agentApiClient.ts         # HTTP client for agent planning & tool catalog
 │   │   │   ├── agentRuntimeCore.ts       # Decoupled high-speed agent execution loop with loop & stagnation detection
 │   │   │   ├── agentApprovalPolicy.ts    # Risk-weighted confirmation policy with per-tool confidence gating
-│   │   │   └── browserMemory.ts          # Agent working memory, per-origin knowledge, and blocklist store
+│   │   │   ├── agentWorkingMemory.ts     # Agent task working memory: page history, visited URLs, context
+│   │   │   ├── agentBrowserMemory.ts     # Per-origin knowledge store and navigation blocklist
+│   │   │   ├── agentSessionMemory.ts     # Session-scoped memory store for cross-task persistence
+│   │   │   ├── agentRecoveryEngine.ts    # Stagnation and loop recovery with replanning triggers
+│   │   │   ├── agentActivity.ts          # Agent activity log for the result modal and observability
+│   │   │   ├── agentToolRegistry.ts      # Frontend catalogue of permitted agent tools with metadata
+│   │   │   ├── browserRuntime.ts         # Frontend IPC bridge to Electron's CDP automation engine
+│   │   │   ├── providerApiClient.ts      # HTTP client for provider management endpoints
+│   │   │   ├── pageContentExtractor.ts   # Utility for extracting page content from IPC snapshots
+│   │   │   └── urlUtils.ts               # URL parsing, normalization, and origin-check utilities
 │   │   └── styles/                       # CSS design tokens, layouts, and animations
 │   ├── e2e/                              # Playwright integration & E2E tests
 │   │   ├── agentMode.spec.ts             # End-to-end agent CDP actions and safety tests
@@ -140,20 +169,25 @@ Prompt_injection_defense_in_AI_Native_Browser/
     │   │   └── onnxClassifier.ts         # Batched inference with sliding sub-chunking & 15s timeout
     │   ├── routes/                       # Fastify HTTP endpoint handlers
     │   │   ├── health.routes.ts          # /api/v1/health status, classifier mode, and fp32 precision
-    │   │   ├── security.routes.ts        # /api/v1/security/* prompt and 22-channel webpage scanning
+    │   │   ├── security.routes.ts        # /api/v1/security/* prompt, 13-channel webpage scanning & explain-scan
     │   │   ├── agent.routes.ts           # /api/v1/agent/plan and /api/v1/agent/tools
     │   │   ├── providers.routes.ts       # /api/v1/providers/* dynamic provider management & models
     │   │   └── llm.routes.ts             # /api/v1/llm/chat guarded chat proxy with history & attachments
     │   ├── schemas/                      # TypeBox contract definitions
     │   │   ├── security.schemas.ts       # Payload schemas for scan requests/verdicts
+    │   │   ├── analysisDetails.schemas.ts# Per-chunk and analysis detail schemas
     │   │   ├── agent.schemas.ts          # Schemas for planner, steps, and AXTree snapshots
     │   │   ├── provider.schemas.ts       # Provider configuration and model schemas
-    │   │   └── llm.schemas.ts            # Chat request/response schemas with history/attachments
+    │   │   ├── llm.schemas.ts            # Chat request/response schemas with history/attachments
+    │   │   └── common.ts                 # Shared error response schema
     │   ├── services/                     # Business logic and detection algorithms
     │   │   ├── ruleBasedDetectorService.ts # Regex detection across 5 attack vectors
     │   │   ├── promptClassifierService.ts  # Dual-detector pipeline coordinator (DL + Rule-based)
     │   │   ├── promptPreprocessingService.ts # Unicode NFKC normalization and HTML stripping
     │   │   ├── textChunkingService.ts    # Sliding window chunker with boundary overlap
+    │   │   ├── scanSummaryService.ts     # LLM-powered scan narrative with 3-paragraph structure & local fallback
+    │   │   ├── featureExplanationService.ts # Instruction density, role override & exfiltration metrics
+    │   │   ├── documentTextExtractor.ts  # PDF, DOCX, and plain-text multimodal attachment extractor
     │   │   ├── agentPlannerService.ts    # Multilingual/Roman Urdu goal translation & multi-action planner
     │   │   ├── agentToolRegistry.ts      # Validated catalogue of 11 safe browser tools with queue coherence & order checks
     │   │   ├── securityEventStore.ts     # Scan audit event log store
@@ -168,21 +202,23 @@ Prompt_injection_defense_in_AI_Native_Browser/
 
 ## Core Features
 
-- **Multi-Channel Webpage Inspection (13 Channels)**: Scans 11 core DOM channels (visible text, hidden content, HTML comments, ARIA labels, meta tags, attributes, inputs, iframe content, shadow DOM, inline scripts, styles) plus 2 extended telemetry channels (external scripts, source maps).
+- **Multi-Channel Webpage Inspection (13 Channels)**: Scans 11 core DOM/accessibility channels (visible text, hidden content, HTML comments, ARIA labels, meta tags, input values, iframe content, shadow DOM, inline scripts, CSS content, CSS generated content) plus 2 extended telemetry channels (external script URLs, source maps). The raw DOMSnapshot string table is intentionally excluded to prevent false positives from structural metadata.
 - **Dual-Detector Security Pipeline**: Combines high-precision regex detection across 5 distinct attack vectors (role override, jailbreaks, hidden webpage directions, system prompt reveal, exfiltration) with a local deep-learning transformer (`Llama Prompt Guard 2 22M` via ONNX Runtime in full `fp32` precision). Automatic 512-token sliding sub-chunking prevents truncation-based evasion.
-- **Decoupled, High-Speed Autonomous Agent**: The autonomous agent loop is engineered for high responsiveness without CPU-bound inference lag on every iteration. Actions are planned directly from Chromium Accessibility Tree (AXTree) semantic states and executed via native CDP hardware-level events.
+- **LLM-Powered Scan Summaries**: The `/security/explain-scan` endpoint passes a sanitized scan digest (never the raw page) to the active LLM provider and returns a structured 3-paragraph plain-text verdict ("Verdict / What was found / What to do"). A built-in local fallback ensures the explainability panel is never empty even without a provider.
+- **Decoupled, High-Speed Autonomous Agent**: The autonomous agent loop is engineered for high responsiveness without CPU-bound inference lag on every iteration. Actions are planned directly from Chromium Accessibility Tree (AXTree) semantic states and executed via native CDP hardware-level events. The `VirtualCursor` module simulates precise cursor positioning before each hardware event.
 - **Risk-Weighted Approval Policy**: Enforces tool-specific confidence thresholds rather than a single global cutoff. High-consequence actions (`click`: 70%, `navigate`: 65%, `finish`: 75%) and sensitive transactions (`financial`, `destructive`, `irreversible`: 85%+ or mandatory consent) require strong confidence, whereas harmless actions (`scroll`, `wait`, `extract`) proceed without nuisance user confirmation.
-- **Loop & Stagnation Detector**: Inspects action history within a rolling 9-action window. If the agent repeats the identical action 3 or more times on the same page without forward progress, it automatically flags stagnation (`LOOP_DETECTED`) and replans an alternative path.
+- **Loop & Stagnation Detector**: Inspects action history within a rolling 9-action window. If the agent repeats the identical action 3 or more times on the same page without forward progress, it automatically flags stagnation (`LOOP_DETECTED`) and the `AgentRecoveryEngine` replans an alternative path.
 - **Resilient Side-Page Handling**: Mid-task navigations or redirects to blocked/untrusted origins no longer crash the entire task. The agent records the navigation block in working memory and guides the planner to take an alternative route or continue on the active page.
 - **Action Order Sanity Checks**: Validates queue coherence on the backend before execution, catching planner sequence mistakes such as `fill` followed immediately by `navigate` without pressing Enter or submitting, duplicate inputs on the same target, or keypresses immediately following a navigation.
 - **Multilingual & Roman Urdu Goal Normalization**: Automatically detects Roman Urdu transliterations and non-English scripts in user goals, performing a lightweight LLM translation normalization pass before planning to ensure accurate element matching and navigation.
-- **Agent Result Modal & Task Observability**: Interactive expandable modal in the agent panel enables users to review complete task execution summaries, structured markdown results, and step-by-step logs.
+- **Agent Result Modal & Task Observability**: Interactive expandable modal in the agent panel enables users to review complete task execution summaries, structured markdown results, and step-by-step activity logs.
 - **Universal Multimodal Attachment Staging**: Chat interface allows users to stage images, PDFs, Word documents (.docx), and text files freely, with real-time model capability detection and friendly warnings if the selected model lacks vision/multimodal support.
 - **Chat History & Session Management**: Supports persistent chat conversations and multi-turn message history with session persistence.
 - **Orbit Celestial Identity & Bookmarks System**: Orbit branding with celestial planet orbs, particle animations, and a full bookmarking bar with persistence and quick navigation.
 - **Hardware-Level CDP Automation**: The agent interacts strictly via native Chromium DevTools Protocol input events (mouse movements, clicks, and keyboard strokes) rather than injected JavaScript DOM methods (`element.click()`).
 - **Universal Provider Gateway & In-Prompt Model Picker**: Connect to any OpenAI-compatible provider (OpenRouter, TokenRouter, NaraRouter, NVIDIA NIM, Cloudflare) or native APIs (Google Gemini, Anthropic Claude). Switch models on-the-fly directly inside the prompt box; keys are encrypted locally using Electron `safeStorage`.
 - **Explainability & Forensic Drawers**: Complete breakdown of dual-detector verdicts, confidence scores, token counts, linguistic density metrics, and matched evidence patterns for scanned prompts and web pages.
+- **Native Overlay Architecture**: The browser chrome (toolbar, bookmarks bar, assistant sidebar) is rendered in a transparent `WebContentsView` overlay painted above guest pages. This means guest pages are never unloaded or hidden behind the UI — they remain live and fully sandboxed.
 
 ---
 
@@ -307,7 +343,8 @@ All backend endpoints are served under `http://127.0.0.1:8000/api/v1`:
 | :--- | :--- | :--- |
 | `GET` | `/health` | Service status, classifier mode, model precision (`fp32`), and runtime versions. |
 | `POST` | `/security/check-prompt` | Evaluates user prompts for direct injection attacks using the dual-detector pipeline. |
-| `POST` | `/security/check-webpage` | Evaluates 22 webpage channels (14 DOM + 8 telemetry) on manual scans. |
+| `POST` | `/security/check-webpage` | Evaluates 13 webpage channels (11 DOM/accessibility + 2 telemetry) on manual scans. |
+| `POST` | `/security/explain-scan` | Generates an LLM-powered plain-text scan summary with local fallback. |
 | `GET` | `/security/events` | Retrieves audit log history of security scans. |
 | `POST` | `/agent/plan` | Normalizes multilingual/Roman Urdu goals, synthesizes page state, and outputs validated tool calls. |
 | `GET` | `/agent/tools` | Returns metadata and TypeBox schemas for the 11 permitted agent tools. |
