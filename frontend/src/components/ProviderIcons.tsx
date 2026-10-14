@@ -128,7 +128,8 @@ export function OpenAdapterBrandIcon({ size = 18 }: { size?: number }) {
   )
 }
 
-export function getProviderLogo(id?: string | null, size = 18): ReactNode {
+/** The brand mark for a provider id, falling back to a generic one. */
+export function ProviderLogo({ id, size = 18 }: { id?: string | null; size?: number }): ReactNode {
   if (!id) return <ZenBrandIcon size={size} />
   const norm = id.toLowerCase()
   if (norm === 'opencode' || norm.includes('zen')) return <ZenBrandIcon size={size} />

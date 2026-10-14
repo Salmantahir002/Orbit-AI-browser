@@ -1,0 +1,171 @@
+/* ────────────────────────────────────────────────────
+   Liquid Glass (see components/LiquidGlass.tsx)
+   ──────────────────────────────────────────────────── */
+
+/* Registered so the glint can ease back out instead of snapping off. */
+@property --lg-glint {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --lg-angle {
+  syntax: '<angle>';
+  inherits: true;
+  initial-value: 160deg;
+}
+
+/* The host keeps its own content; the glass is painted beneath it. Its
+   background must stay transparent or the glass has nothing to bend. Its
+   transform belongs to LiquidGlass's springs, so it is never transitioned;
+   will-change gives it a layer of its own, so a spring frame moves that layer
+   on the compositor instead of repainting the host's content. */
+.lg-host {
+  position: relative;
+  isolation: isolate;
+  background: transparent;
+  --lg-tint: rgba(36, 37, 42, 0.34);
+  will-change: transform;
+  transition: box-shadow 0.2s ease;
+}
+
+/* LiquidGlass writes the pointer's --lg-* properties here, not on the host. */
+.lg-layers {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  transition: --lg-glint 0.45s ease;
+}
+
+.lg-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.lg-warp,
+.lg-tint,
+.lg-sheen,
+.lg-rim {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.lg-warp {
+  overflow: hidden;
+}
+
+/* The sheen and the rim follow the pointer, so they repaint on every frame it
+   moves. On their own layers that repaint is theirs alone; painted into the
+   host's layer it re-rasters the host's content with them, which on a large
+   card full of text (the providers dialog) cost one frame in four. */
+.lg-sheen,
+.lg-rim {
+  will-change: transform;
+}
+
+/* A thin wash of the browser chrome's own grey, lit from above. */
+.lg-tint {
+  background: var(--lg-tint);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 -1px 1px rgba(0, 0, 0, 0.16),
+    0 10px 30px rgba(0, 0, 0, 0.3),
+    0 2px 6px rgba(0, 0, 0, 0.18);
+}
+
+/* Soft light that follows the pointer across the surface. */
+.lg-sheen {
+  opacity: var(--lg-glint);
+  background: radial-gradient(140px circle at var(--lg-x, 50%) var(--lg-y, 0%), rgba(255, 255, 255, 0.075), transparent 70%);
+}
+
+/* Specular rim: brightest on the side facing the pointer, with a fainter
+   counter-reflection opposite, as a curved glass edge catches light. */
+.lg-rim {
+  padding: 1px;
+  background: linear-gradient(
+    var(--lg-angle),
+    rgba(255, 255, 255, 0.38) 0%,
+    rgba(255, 255, 255, 0.07) 28%,
+    rgba(255, 255, 255, 0.03) 60%,
+    rgba(255, 255, 255, 0.2) 100%
+  );
+  opacity: calc(0.5 + 0.5 * max(var(--lg-glint), var(--lg-focus, 0)));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+
+/* Press physics for small glass controls: squeeze on press, spring back
+   past rest on release. */
+.lg-press {
+  transition:
+    transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1),
+    background 0.18s ease,
+    color 0.18s ease,
+    opacity 0.18s ease;
+}
+
+.lg-press.lg-press:active:not(:disabled) {
+  transform: scale(0.88);
+  transition-duration: 0.12s, 0.18s, 0.18s, 0.18s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lg-host,
+  .lg-layers,
+  .lg-press {
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── The page beneath the assistant panel (see usePageBackdrop) ──
+   A tiny frame of the page beside the panel, mirrored so its edge meets the
+   page's edge at the seam, blown up and blurred into light and colour: the
+   panel reads as a pane of glass over the page rather than a grey slab. Each
+   new frame fades in over the last. The veil over it is the glass's own
+   smoke, thicker over bright pages (--backdrop-luminance) so white text stays
+   legible. */
+.assistant-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.assistant-backdrop img {
+  position: absolute;
+  inset: -80px;
+  width: calc(100% + 160px);
+  height: calc(100% + 160px);
+  object-fit: cover;
+  transform: scaleX(-1);
+  filter: blur(34px) saturate(1.35);
+  animation: assistant-backdrop-in 0.9s ease both;
+}
+
+@keyframes assistant-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.assistant-backdrop::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 30%),
+    rgba(16, 16, 20, calc(0.36 + 0.4 * var(--backdrop-luminance, 0.5)));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assistant-backdrop img {
+    animation: none;
+  }
+}

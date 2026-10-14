@@ -1,6 +1,7 @@
 import { useState, type FormEvent, type MouseEvent } from 'react'
 import { normalizeUrl } from '../services/urlUtils'
 import { BrowserLogo } from './BrowserLogo'
+import { LiquidGlass } from './LiquidGlass'
 
 type BrowserToolbarProps = {
   addressValue: string
@@ -191,25 +192,29 @@ export function BrowserToolbar({
           </button>
         ) : null}
         <button
-          className={`scan-button ${isScanning ? 'scan-button--scanning' : ''}`}
+          className={`scan-button lg-host ${isScanning ? 'scan-button--scanning' : ''}`}
           type="button"
           onClick={onScanPage}
           disabled={isScanning}
           title="Scan page for prompt injection attacks"
           aria-label="Scan page"
         >
+          {/* Frosted: the toolbar behind is one flat colour, so refraction would bend
+              nothing visible and its filter costs a dropped frame on the first press. */}
+          <LiquidGlass refraction={0} blur={5} elasticity={0.16} />
           <ShieldIcon />
           <span>{isScanning ? 'Scanning...' : 'Scan'}</span>
         </button>
 
         <button
-          className={`assistant-pill ${assistantOpen ? 'assistant-pill--active' : ''}`}
+          className={`assistant-pill lg-host ${assistantOpen ? 'assistant-pill--active' : ''}`}
           type="button"
           aria-label="Toggle AI Agent"
           aria-pressed={assistantOpen}
           onClick={onAssistantToggle}
           title="Toggle AI Agent"
         >
+          <LiquidGlass refraction={0} blur={5} elasticity={0.16} />
           <BrowserLogo size={14} />
           <span>Ai Agent</span>
         </button>

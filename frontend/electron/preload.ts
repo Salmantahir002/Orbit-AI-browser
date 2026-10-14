@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import { RUNTIME_INVOKE_CHANNEL } from './browserRuntime/runtimeContract.js'
 import type { BrowserUIBridge, BrowserSnapshot, OverlayState, BrowserCommand, DownloadEntry } from './browserUITypes.js'
+import type { ClientProviderView, ProviderSaveRequest } from './providerSecureStore.js'
 
 function subscribe<T>(channel: string, listener: (value: T) => void) {
   const handler = (_event: IpcRendererEvent, payload: T) => listener(payload)
@@ -96,15 +97,21 @@ const electronAPI = {
       ipcRenderer.on('agent:stop-requested', handler)
       return () => ipcRenderer.removeListener('agent:stop-requested', handler)
     },
+    // A tiny blurred-backdrop frame of a tab (or, with a null id, of a shell region) for the glass assistant panel.
+    captureBackdrop: (webContentsId: number | null, region?: { x: number; y: number; width: number; height: number }) =>
+      ipcRenderer.invoke('browser:capture-backdrop', webContentsId, region) as Promise<{ image: string; luminance: number } | null>,
+    // One full frame of a tab, shown in its place while a report drawer hides it.
+    captureFrame: (webContentsId: number) =>
+      ipcRenderer.invoke('browser:capture-frame', webContentsId) as Promise<{ image: string; luminance: number } | null>,
   },
   // Secure Provider Storage APIs
   providers: {
-    getAll: () => ipcRenderer.invoke('providers:get-all') as Promise<any[]>,
-    save: (config: any) => ipcRenderer.invoke('providers:save', config) as Promise<any>,
+    getAll: () => ipcRenderer.invoke('providers:get-all') as Promise<ClientProviderView[]>,
+    save: (config: ProviderSaveRequest) => ipcRenderer.invoke('providers:save', config) as Promise<ClientProviderView>,
     delete: (providerId: string) => ipcRenderer.invoke('providers:delete', providerId) as Promise<{ ok: boolean }>,
     setActive: (payload: { id: string | null; selected_model?: string }) =>
       ipcRenderer.invoke('providers:set-active', payload) as Promise<{ ok: boolean }>,
-    getActive: () => ipcRenderer.invoke('providers:get-active') as Promise<any>,
+    getActive: () => ipcRenderer.invoke('providers:get-active') as Promise<ClientProviderView | null>,
   },
 }
 

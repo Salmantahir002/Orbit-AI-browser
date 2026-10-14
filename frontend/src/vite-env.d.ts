@@ -35,6 +35,21 @@ interface Window {
       onPopupClosed: (listener: (webContentsId: number) => void) => () => void
       setAgentLock: (webContentsId: number, locked: boolean) => Promise<boolean>
       onAgentStopRequested: (listener: (webContentsId: number) => void) => () => void
+      captureBackdrop: (
+        webContentsId: number | null,
+        region?: { x: number; y: number; width: number; height: number },
+      ) => Promise<{ image: string; luminance: number } | null>
+      captureFrame: (webContentsId: number) => Promise<{ image: string; luminance: number } | null>
+    }
+    // Provider configs live in main's safeStorage-backed store; see providerApiClient.ts.
+    providers: {
+      getAll: () => Promise<import('./types/providerTypes').ClientProviderConfig[]>
+      save: (
+        config: import('./types/providerTypes').ClientProviderConfig & { set_active?: boolean },
+      ) => Promise<import('./types/providerTypes').ClientProviderConfig>
+      delete: (providerId: string) => Promise<{ ok: boolean }>
+      setActive: (payload: { id: string | null; selected_model?: string }) => Promise<{ ok: boolean }>
+      getActive: () => Promise<import('./types/providerTypes').ClientProviderConfig | null>
     }
   }
 }

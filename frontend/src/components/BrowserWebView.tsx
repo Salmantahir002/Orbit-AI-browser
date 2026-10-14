@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type FormEvent } from 'react'
 import type { WebpageContent } from '../types/securityTypes'
 import { BrowserLogo } from './BrowserLogo'
+import { LiquidGlass } from './LiquidGlass'
 
 export type BrowserWebViewHandle = {
   extractContent: () => Promise<WebpageContent | null>
@@ -137,7 +138,8 @@ function HomePage({ onSearch, zoom = 100 }: HomePageProps) {
           <h1 className="homepage-hero-title">orbit</h1>
           <p className="homepage-hero-subtitle">A BROWSER FOR AGENTIC SEARCH WITH PROMPT DEFENSE</p>
         </div>
-        <button className="homepage-start-button" type="button" onClick={() => setIsSearchOpen(true)}>
+        <button className="homepage-start-button lg-host" type="button" onClick={() => setIsSearchOpen(true)}>
+          <LiquidGlass refraction={44} bezel={14} blur={5} aberration={0} elasticity={0.16} />
           Start browsing
           <ArrowIcon />
         </button>
@@ -285,7 +287,7 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
         setActiveUrl(url)
         const webContentsId = webContentsIdRef.current
         if (webContentsId !== null) {
-          window.electronAPI?.browser.navigate(webContentsId, url).catch((err: any) => {
+          window.electronAPI?.browser.navigate(webContentsId, url).catch((err: unknown) => {
             console.error('[browser] navigate failed:', err)
           })
         }

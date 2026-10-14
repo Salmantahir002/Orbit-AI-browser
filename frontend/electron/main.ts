@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, session, WebContentsView } from 'electron'
-import type { IpcMainEvent, IpcMainInvokeEvent, WebContents } from 'electron'
+import type { IpcMainEvent, IpcMainInvokeEvent, NativeImage, WebContents } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applyElectronSecurityConfig } from './electronSecurityConfig.js'
@@ -15,7 +15,7 @@ import {
   type RuntimeResult,
 } from './browserRuntime/index.js'
 
-import { providerSecureStore } from './providerSecureStore.js'
+import { providerSecureStore, type ProviderSaveRequest } from './providerSecureStore.js'
 import { BrowserUIController } from './browserUIController.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -94,7 +94,7 @@ function attachGuestBehaviour(view: WebContentsView, mainWindow: BrowserWindow) 
   let lastVisitId: string | null = null
   let lastVisitUrl: string | null = null
   const recordVisit = (url: string) => { lastVisitId = browserUI.profile.recordVisit(url, contents.getTitle()); lastVisitUrl = url }
-  contents.on('did-navigate', (_event, url, _status, _description) => { browserUI.applyPageZoom(contents); recordVisit(url) })
+  contents.on('did-navigate', (_event, url) => { browserUI.applyPageZoom(contents); recordVisit(url) })
   // SPAs (GitHub, YouTube, …) call history.replaceState/pushState repeatedly while loading,
   // each firing did-navigate-in-page with the same URL; only a changed URL is a new visit.
   contents.on('did-navigate-in-page', (_event, url, isMainFrame) => { if (isMainFrame && url !== lastVisitUrl) recordVisit(url) })
@@ -296,6 +296,86 @@ ipcMain.handle('browser:get-tab-info', (event, webContentsId: unknown) => {
   return { url: view.webContents.getURL(), title: view.webContents.getTitle() }
 })
 
+// The assistant panel is glass, but a guest page is a native view the panel's
+// CSS cannot see through. It asks for a tiny frame of the page beside it (or,
+// on the home page, of the shell's own page area) and paints that, blurred,
+// behind its glass. Only the half next to the panel is taken; it is shrunk to
+// a few dozen pixels here, so no readable page content ever leaves main. The
+// luminance lets the panel darken its tint over bright pages to keep its own
+// text legible.
+const BACKDROP_WIDTH = 48
+
+function isRect(value: unknown): value is { x: number; y: number; width: number; height: number } {
+  const rect = value as { x: number; y: number; width: number; height: number } | null
+  return Boolean(rect) && [rect!.x, rect!.y, rect!.width, rect!.height].every(Number.isFinite)
+}
+
+ipcMain.handle('browser:capture-backdrop', async (event, webContentsId: unknown, region: unknown) => {
+  const mainWindow = requireShell(event)
+  if (!mainWindow) return null
+  let frame: NativeImage
+  try {
+    if (webContentsId !== null) {
+      const view = requireTabView(event, webContentsId)
+      if (!view || view.webContents.isDestroyed()) return null
+      const { width, height } = view.getBounds()
+      // Zero bounds: the guest is hidden (a modal, a drag-resize). Keep the old frame.
+      if (width < 2 || height < 2) return null
+      frame = await view.webContents.capturePage({ x: Math.floor(width / 2), y: 0, width: Math.ceil(width / 2), height })
+    } else {
+      if (!isRect(region) || region.width < 2 || region.height < 2) return null
+      frame = await mainWindow.webContents.capturePage({
+        x: Math.round(region.x + region.width / 2),
+        y: Math.round(region.y),
+        width: Math.round(region.width / 2),
+        height: Math.round(region.height),
+      })
+    }
+  } catch {
+    return null
+  }
+  if (frame.isEmpty()) return null
+
+  const small = frame.resize({ width: BACKDROP_WIDTH, quality: 'good' })
+  return { image: `data:image/jpeg;base64,${small.toJPEG(70).toString('base64')}`, luminance: meanLuminance(small) }
+})
+
+/** Mean luminance of an image, 0 (black) to 1 (white). Sample small images only. */
+function meanLuminance(image: NativeImage): number {
+  const bitmap = image.toBitmap() // BGRA
+  let sum = 0
+  for (let i = 0; i < bitmap.length; i += 4) sum += 0.0722 * bitmap[i] + 0.7152 * bitmap[i + 1] + 0.2126 * bitmap[i + 2]
+  return bitmap.length ? sum / (bitmap.length / 4) / 255 : 0
+}
+
+// The report drawers are glass too, but while one is open the guest view is
+// hidden (it would cover the drawer). Just before it hides, the shell asks for
+// one frame of the whole page and shows it in the guest's place, so the drawer
+// slides in over the page itself. The frame is scaled to the view's CSS size
+// and never leaves this window. The luminance is of the strip the drawer
+// covers, for the drawer's tint to darken over bright pages.
+const DRAWER_STRIP_WIDTH = 540
+
+ipcMain.handle('browser:capture-frame', async (event, webContentsId: unknown) => {
+  const view = requireTabView(event, webContentsId)
+  if (!view || view.webContents.isDestroyed()) return null
+  const { width, height } = view.getBounds()
+  // Zero bounds: the guest is already hidden, so there is nothing on screen to freeze.
+  if (width < 2 || height < 2) return null
+  let frame: NativeImage
+  try {
+    frame = await view.webContents.capturePage()
+  } catch {
+    return null
+  }
+  if (frame.isEmpty()) return null
+
+  const sized = frame.resize({ width, height, quality: 'good' })
+  const stripWidth = Math.min(DRAWER_STRIP_WIDTH, width)
+  const strip = sized.crop({ x: width - stripWidth, y: 0, width: stripWidth, height }).resize({ width: BACKDROP_WIDTH, quality: 'good' })
+  return { image: `data:image/jpeg;base64,${sized.toJPEG(82).toString('base64')}`, luminance: meanLuminance(strip) }
+})
+
 ipcMain.handle('browser:navigate', async (event, webContentsId: unknown, url: unknown) => {
   const view = requireTabView(event, webContentsId)
   if (!view || typeof url !== 'string') return
@@ -304,8 +384,8 @@ ipcMain.handle('browser:navigate', async (event, webContentsId: unknown, url: un
   // suite's same-URL reloads — depend on that to know the page actually reset.
   try {
     await view.webContents.loadURL(url)
-  } catch (err: any) {
-    if (err?.code !== 'ERR_ABORTED') console.error('[main] Tab loadURL failed:', err)
+  } catch (err) {
+    if ((err as { code?: unknown } | null)?.code !== 'ERR_ABORTED') console.error('[main] Tab loadURL failed:', err)
   }
 })
 
@@ -382,7 +462,7 @@ ipcMain.handle('providers:get-all', () => {
   return providerSecureStore.getAllProviders()
 })
 
-ipcMain.handle('providers:save', async (_event, payload: any) => {
+ipcMain.handle('providers:save', async (_event, payload: ProviderSaveRequest) => {
   const result = providerSecureStore.saveProvider(payload)
   if (payload.set_active) {
     await providerSecureStore.syncWithBackend()

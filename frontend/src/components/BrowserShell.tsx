@@ -30,6 +30,12 @@ const HOMEPAGE_TAB_TITLE = 'New tab'
 const AGENT_TAB_ATTACH_ATTEMPTS = 20
 const AGENT_TAB_ATTACH_POLL_MS = 150
 const MINIMUM_WEBPAGE_SCAN_DURATION_MS = 10_000
+/** A report drawer opens without its frozen page rather than wait longer than this for one. */
+const PAGE_FREEZE_TIMEOUT_MS = 200
+/** The frozen page outlives a closing drawer until the guest view is back on top of it. */
+const PAGE_FREEZE_HOLD_MS = 400
+
+type FrozenPage = { image: string; luminance: number }
 
 function waitForMinimumScanDuration(startedAt: number) {
   const remainingTime = MINIMUM_WEBPAGE_SCAN_DURATION_MS - (performance.now() - startedAt)
@@ -189,6 +195,11 @@ export function BrowserShell() {
   const [webpageScanResult, setWebpageScanResult] = useState<SecurityCheckResponse | null>(null)
   const [webpageScanContent, setWebpageScanContent] = useState<WebpageContent | null>(null)
   const [isScanningPage, setIsScanningPage] = useState(false)
+  // While a report drawer is open the guest view is hidden (a native view would
+  // cover the drawer). A frame of the page, taken just before, stands in its
+  // place, so the drawer's glass slides in over the page, not an empty window.
+  const [frozenPage, setFrozenPage] = useState<FrozenPage | null>(null)
+  const isReportDrawerOpen = promptDrawerOpen || webpageDrawerOpen
   const [isProviderSettingsOpen, setIsProviderSettingsOpen] = useState(false)
   const [activeTargetId, setActiveTargetId] = useState<number | null>(null)
   const [bookmarks, setBookmarks] = useState<BookmarkItem[]>(readStoredBookmarks)
@@ -381,6 +392,8 @@ export function BrowserShell() {
     webviewHandlesRef.current.get(tabId)?.loadURL(url)
   }, [activeTabId, updateTabUrl])
 
+  const getActiveWebviewHandle = useCallback(() => webviewHandlesRef.current.get(activeTabId) ?? null, [activeTabId])
+
   const setWebviewHandle = useCallback((tabId: string, handle: BrowserWebViewHandle | null) => {
     if (handle) {
       webviewHandlesRef.current.set(tabId, handle)
@@ -487,19 +500,6 @@ export function BrowserShell() {
     }
   }, [activeTabId, handleSelectTab, runBrowserAction, tabs])
 
-  useEffect(() => window.electronAPI?.browserUI.onCommand(({ command, url }) => {
-    if (command === 'new-tab') { if (url) handleOpenBookmarkInNewTab(url); else handleNewTab() }
-    else if (command === 'bookmark-page') handleToggleBookmarkCurrentPage()
-    else if (command === 'close-tab') handleCloseTab(activeTabId)
-    else if (command === 'focus-address') {
-      const input = document.querySelector<HTMLInputElement>('.address-input'); input?.focus(); input?.select()
-    } else if (command === 'provider-settings') setIsProviderSettingsOpen(true)
-    else if (command === 'next-tab' || command === 'previous-tab') {
-      const index = tabs.findIndex((tab) => tab.id === activeTabId)
-      handleSelectTab(tabs[(index + (command === 'next-tab' ? 1 : tabs.length - 1)) % tabs.length])
-    }
-  }), [activeTabId, handleCloseTab, handleNewTab, handleOpenBookmarkInNewTab, handleSelectTab, handleToggleBookmarkCurrentPage, tabs])
-
   useEffect(() => {
     const browser = window.electronAPI?.browser
     if (!browser) return undefined
@@ -523,13 +523,59 @@ export function BrowserShell() {
     }
   }, [handleCloseTab, handleSelectTab, tabs])
 
+  // Call before opening a report drawer, while the guest is still on screen.
+  const freezeActivePage = useCallback(async () => {
+    const webContentsId = webviewHandlesRef.current.get(activeTabId)?.getWebContentsId() ?? null
+    const captureFrame = window.electronAPI?.browser?.captureFrame
+    if (webContentsId === null || !captureFrame) {
+      setFrozenPage(null)
+      return
+    }
+    const frame = await Promise.race([
+      captureFrame(webContentsId).catch(() => null),
+      new Promise<null>((resolve) => window.setTimeout(() => resolve(null), PAGE_FREEZE_TIMEOUT_MS)),
+    ])
+    // No frame when the guest is not showing: on the home page (drawn by the
+    // shell, so the drawer sees it anyway) or behind a drawer already open,
+    // whose frozen frame is still current.
+    if (frame) setFrozenPage(frame)
+  }, [activeTabId])
+
+  useEffect(() => {
+    if (isReportDrawerOpen || isProviderSettingsOpen || !frozenPage) return undefined
+    const timer = window.setTimeout(() => setFrozenPage(null), PAGE_FREEZE_HOLD_MS)
+    return () => window.clearTimeout(timer)
+  }, [isReportDrawerOpen, isProviderSettingsOpen, frozenPage])
+
+  // The providers dialog is glass too, so it opens over a frozen page like the reports.
+  const handleOpenSettings = useCallback(() => {
+    void freezeActivePage().then(() => setIsProviderSettingsOpen(true))
+  }, [freezeActivePage])
+  const handleCloseSettings = useCallback(() => setIsProviderSettingsOpen(false), [])
+
+  useEffect(() => window.electronAPI?.browserUI.onCommand(({ command, url }) => {
+    if (command === 'new-tab') { if (url) handleOpenBookmarkInNewTab(url); else handleNewTab() }
+    else if (command === 'bookmark-page') handleToggleBookmarkCurrentPage()
+    else if (command === 'close-tab') handleCloseTab(activeTabId)
+    else if (command === 'focus-address') {
+      const input = document.querySelector<HTMLInputElement>('.address-input'); input?.focus(); input?.select()
+    } else if (command === 'provider-settings') handleOpenSettings()
+    else if (command === 'next-tab' || command === 'previous-tab') {
+      const index = tabs.findIndex((tab) => tab.id === activeTabId)
+      handleSelectTab(tabs[(index + (command === 'next-tab' ? 1 : tabs.length - 1)) % tabs.length])
+    }
+  }), [activeTabId, handleCloseTab, handleNewTab, handleOpenBookmarkInNewTab, handleOpenSettings, handleSelectTab, handleToggleBookmarkCurrentPage, tabs])
+
   const handleScanPage = useCallback(async () => {
     if (isScanningPage) return
 
     setIsScanningPage(true)
     const scanStartedAt = performance.now()
     try {
-      const content = await extractPageContent(webviewHandlesRef.current.get(activeTabId) ?? null)
+      const [content] = await Promise.all([
+        extractPageContent(webviewHandlesRef.current.get(activeTabId) ?? null),
+        freezeActivePage(),
+      ])
       if (!content) {
         return
       }
@@ -549,7 +595,7 @@ export function BrowserShell() {
     } finally {
       setIsScanningPage(false)
     }
-  }, [activeTabId, isScanningPage])
+  }, [activeTabId, freezeActivePage, isScanningPage])
 
   // The webview attaches asynchronously, so the id is polled while the
   // assistant is open rather than read once at mount.
@@ -566,11 +612,12 @@ export function BrowserShell() {
     return () => window.clearInterval(intervalId)
   }, [activeTabId, assistantOpen, currentUrl])
 
-  const handleViewPromptDetails = useCallback((details: AnalysisDetails) => {
+  const handleViewPromptDetails = useCallback(async (details: AnalysisDetails) => {
     setPromptDetails(details)
+    await freezeActivePage()
     setWebpageDrawerOpen(false)
     setPromptDrawerOpen(true)
-  }, [])
+  }, [freezeActivePage])
 
   const handleClosePromptDrawer = useCallback(() => {
     setPromptDrawerOpen(false)
@@ -623,14 +670,15 @@ export function BrowserShell() {
   // Mounted once wanted and then kept, so a chat or a running agent task survives closing the panel.
   const assistantMounted = useLatch(assistantOpen || assistantWarm)
   const providerSettingsMounted = useLatch(isProviderSettingsOpen)
-  const handleOpenSettings = useCallback(() => setIsProviderSettingsOpen(true), [])
-  const handleCloseSettings = useCallback(() => setIsProviderSettingsOpen(false), [])
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const isCurrentTabLoading = Boolean(activeTab?.isLoading)
 
   return (
-    <main className="browser-shell">
+    <main
+      className="browser-shell"
+      style={frozenPage ? ({ '--page-luminance': frozenPage.luminance.toFixed(3) } as CSSProperties) : undefined}
+    >
       {/* Tab Strip */}
       <div className="tab-strip" role="tablist" aria-label="Browser tabs">
         <div className="tab-strip-items">
@@ -731,6 +779,7 @@ export function BrowserShell() {
                 onSearch={handleWebViewSearch}
               />
             ))}
+            {frozenPage ? <img className="webview-freeze" src={frozenPage.image} alt="" aria-hidden="true" draggable={false} /> : null}
           </div>
           <div
             className={`assistant-sidebar-container ${assistantOpen ? 'assistant-sidebar-container--open' : 'assistant-sidebar-container--closed'}`}
@@ -740,7 +789,7 @@ export function BrowserShell() {
               <AiAssistantSidebar
                 activeTargetId={activeTargetId}
                 activeTabTitle={activeTab?.title}
-                activeWebviewHandle={webviewHandlesRef.current.get(activeTabId) ?? null}
+                getActiveWebviewHandle={getActiveWebviewHandle}
                 currentUrl={currentUrl}
                 onOpenTab={handleAgentOpenTab}
                 onResizingChange={setIsResizingAssistant}

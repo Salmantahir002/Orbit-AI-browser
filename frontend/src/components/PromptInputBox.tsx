@@ -8,6 +8,7 @@ import {
   type ReactNode,
   type ChangeEvent,
 } from 'react'
+import { LiquidGlass } from './LiquidGlass'
 import { PromptModelPicker } from './PromptModelPicker'
 
 import { getModelCapabilities } from '../utils/modelCapabilities'
@@ -87,6 +88,25 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+type ActiveModelInfo = { providerId: string; modelId: string; modelName: string }
+
+/** The active provider's model, or empty strings when none is active; null if it can't be read. */
+async function readActiveModelInfo(): Promise<ActiveModelInfo | null> {
+  try {
+    const stored = await getAllStoredProviders().catch(() => [])
+    const active = stored.find((p) => p.is_active)
+    if (!active) return { providerId: '', modelId: '', modelName: '' }
+    const modelObj = active.models?.find((m) => m.id === active.selected_model)
+    return {
+      providerId: active.id || '',
+      modelId: active.selected_model || '',
+      modelName: modelObj?.name || active.selected_model || active.name || 'Active Model',
+    }
+  } catch {
+    return null
+  }
+}
+
 export function PromptInputBox({
   disabled,
   onSubmit,
@@ -108,32 +128,25 @@ export function PromptInputBox({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const attachMenuRef = useRef<HTMLDivElement>(null)
 
-  // Load current active provider & model info
-  const updateActiveModelInfo = useCallback(async () => {
-    try {
-      const stored = await getAllStoredProviders().catch(() => [])
-      const active = stored.find((p) => p.is_active)
-      if (active) {
-        setActiveProviderId(active.id || '')
-        setActiveModelId(active.selected_model || '')
-        const modelObj = active.models?.find((m) => m.id === active.selected_model)
-        setActiveModelName(modelObj?.name || active.selected_model || active.name || 'Active Model')
-      } else {
-        setActiveProviderId('')
-        setActiveModelId('')
-        setActiveModelName('')
-      }
-    } catch {
-      // ignore
+  // Load the active provider & model now and whenever the providers change.
+  // State is set from the load's callback, never synchronously in the effect.
+  useEffect(() => {
+    let subscribed = true
+    const refresh = () => {
+      void readActiveModelInfo().then((info) => {
+        if (!subscribed || !info) return
+        setActiveProviderId(info.providerId)
+        setActiveModelId(info.modelId)
+        setActiveModelName(info.modelName)
+      })
+    }
+    refresh()
+    window.addEventListener('promptguard:providers-updated', refresh)
+    return () => {
+      subscribed = false
+      window.removeEventListener('promptguard:providers-updated', refresh)
     }
   }, [])
-
-  useEffect(() => {
-    updateActiveModelInfo()
-    const handleUpdate = () => updateActiveModelInfo()
-    window.addEventListener('promptguard:providers-updated', handleUpdate)
-    return () => window.removeEventListener('promptguard:providers-updated', handleUpdate)
-  }, [updateActiveModelInfo])
 
   // Compute model capabilities
   const capabilities = getModelCapabilities(activeModelId, activeProviderId, activeModelName)
@@ -156,10 +169,14 @@ export function PromptInputBox({
     return null
   }, [capabilities.supportsImages, capabilities.supportsFiles, capabilities.modelName])
 
-  // Automatically update incompatibility error when attachments or model change
-  useEffect(() => {
+  // Recompute the incompatibility error when the attachments or the model change.
+  // Adjusted during render (React's pattern for state derived from changing
+  // inputs), so a dismissed warning stays dismissed until either changes.
+  const [warningInputs, setWarningInputs] = useState({ attachments, check: computeIncompatibilityError })
+  if (warningInputs.attachments !== attachments || warningInputs.check !== computeIncompatibilityError) {
+    setWarningInputs({ attachments, check: computeIncompatibilityError })
     setIncompatibilityWarning(computeIncompatibilityError(attachments))
-  }, [attachments, computeIncompatibilityError])
+  }
 
   // Close attachment dropdown when clicking outside
   useEffect(() => {
@@ -174,12 +191,14 @@ export function PromptInputBox({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [isAttachMenuOpen])
 
-  // Clear inputs on clearSignal
-  useEffect(() => {
+  // Clear inputs when clearSignal changes (adjusted during render, as above).
+  const [seenClearSignal, setSeenClearSignal] = useState(clearSignal)
+  if (clearSignal !== seenClearSignal) {
+    setSeenClearSignal(clearSignal)
     setPrompt('')
     setAttachments([])
     setIncompatibilityWarning(null)
-  }, [clearSignal])
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -324,7 +343,8 @@ export function PromptInputBox({
   const canSubmit = !disabled && (Boolean(prompt.trim()) || attachments.length > 0)
 
   return (
-    <form className="prompt-form" onSubmit={handleSubmit}>
+    <form className="prompt-form lg-host" onSubmit={handleSubmit}>
+      <LiquidGlass refraction={96} bezel={22} blur={6} elasticity={0.14} />
       {/* Hidden file inputs */}
       <input
         type="file"
@@ -422,7 +442,7 @@ export function PromptInputBox({
           <div className="prompt-attachment-picker-wrapper" ref={attachMenuRef}>
             <button
               type="button"
-              className={`prompt-icon-btn ${isAttachMenuOpen ? 'prompt-icon-btn--active' : ''}`}
+              className={`prompt-icon-btn lg-press ${isAttachMenuOpen ? 'prompt-icon-btn--active' : ''}`}
               title="Attach file or image"
               aria-label="Attach file or image"
               aria-expanded={isAttachMenuOpen}
@@ -473,7 +493,7 @@ export function PromptInputBox({
         </div>
 
         <button
-          className="prompt-submit"
+          className="prompt-submit lg-press"
           type="submit"
           disabled={!canSubmit}
           aria-label="Send"

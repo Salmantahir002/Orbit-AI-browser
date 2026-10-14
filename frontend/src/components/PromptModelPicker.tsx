@@ -5,7 +5,7 @@ import {
   getAllStoredProviders,
   setActiveStoredProvider,
 } from '../services/providerApiClient'
-import { getProviderLogo } from './ProviderIcons'
+import { ProviderLogo } from './ProviderIcons'
 
 interface PromptModelPickerProps {
   onOpenSettings?: () => void
@@ -62,22 +62,17 @@ function formatModelName(modelId: string, modelName?: string): { title: string; 
   return { title, isFree }
 }
 
-export function PromptModelPicker({ onOpenSettings, className = '' }: PromptModelPickerProps) {
-  const [activeInfo, setActiveInfo] = useState<ActiveProviderInfo | null>(null)
-  const [savedProviders, setSavedProviders] = useState<ClientProviderConfig[]>([])
-  const [isOpen, setIsOpen] = useState(false)
-  const [isLoadingModels, setIsLoadingModels] = useState(false)
-  const [searchTerm, setSearchTerm] = useState('')
-  const pickerRef = useRef<HTMLDivElement>(null)
+/** `stored` is null when the stored providers could not be read; `active` then falls back to none. */
+type ProviderState = { stored: ClientProviderConfig[] | null; active: ActiveProviderInfo | null }
 
-  const refreshActiveInfo = async () => {
-    try {
-      const stored = await getAllStoredProviders().catch(() => [])
-      setSavedProviders(stored)
-
-      const activeStored = stored.find((p) => p.is_active)
-      if (activeStored) {
-        setActiveInfo({
+async function loadProviderState(): Promise<ProviderState> {
+  try {
+    const stored = await getAllStoredProviders().catch(() => [])
+    const activeStored = stored.find((p) => p.is_active)
+    return {
+      stored,
+      active: activeStored
+        ? {
           id: activeStored.id,
           name: activeStored.name,
           provider_type: activeStored.provider_type,
@@ -87,20 +82,42 @@ export function PromptModelPicker({ onOpenSettings, className = '' }: PromptMode
           selected_model: activeStored.selected_model,
           models: activeStored.models,
           masked_key: activeStored.masked_key || '',
-        })
-      } else {
-        setActiveInfo(null)
-      }
-    } catch {
-      setActiveInfo(null)
+        }
+        : null,
     }
+  } catch {
+    return { stored: null, active: null }
+  }
+}
+
+export function PromptModelPicker({ onOpenSettings, className = '' }: PromptModelPickerProps) {
+  const [activeInfo, setActiveInfo] = useState<ActiveProviderInfo | null>(null)
+  const [savedProviders, setSavedProviders] = useState<ClientProviderConfig[]>([])
+  const [isOpen, setIsOpen] = useState(false)
+  const [isLoadingModels, setIsLoadingModels] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
+  const pickerRef = useRef<HTMLDivElement>(null)
+
+  const applyProviderState = ({ stored, active }: ProviderState) => {
+    if (stored) setSavedProviders(stored)
+    setActiveInfo(active)
   }
 
+  const refreshActiveInfo = async () => applyProviderState(await loadProviderState())
+
+  // Loads now and whenever the providers change; state is set from the load's
+  // callback, never synchronously in the effect.
   useEffect(() => {
-    refreshActiveInfo()
-    const handleUpdated = () => refreshActiveInfo()
+    let subscribed = true
+    const handleUpdated = () => {
+      void loadProviderState().then((state) => {
+        if (subscribed) applyProviderState(state)
+      })
+    }
+    handleUpdated()
     window.addEventListener('promptguard:providers-updated', handleUpdated)
     return () => {
+      subscribed = false
       window.removeEventListener('promptguard:providers-updated', handleUpdated)
     }
   }, [])
@@ -246,16 +263,14 @@ export function PromptModelPicker({ onOpenSettings, className = '' }: PromptMode
       try {
         const fetched = await fetchProviderModels(currentProvider)
         if (fetched && fetched.length > 0) {
-          if (currentProvider.id.includes('openrouter')) {
-            const filtered = fetched.filter((m) => m.id !== 'openrouter/auto' && m.id !== 'auto')
-            currentProvider.models = [
+          const models: ModelInfo[] = currentProvider.id.includes('openrouter')
+            ? [
               { id: 'openrouter/auto', name: 'Auto (Best for prompt / routes automatically)' },
-              ...filtered,
+              ...fetched.filter((m) => m.id !== 'openrouter/auto' && m.id !== 'auto'),
             ]
-          } else {
-            currentProvider.models = fetched
-          }
-          setSavedProviders([...savedProviders])
+            : fetched
+          const providerId = currentProvider.id
+          setSavedProviders((providers) => providers.map((p) => (p.id === providerId ? { ...p, models } : p)))
         }
       } catch {
         // Silently handle
@@ -314,7 +329,7 @@ export function PromptModelPicker({ onOpenSettings, className = '' }: PromptMode
         {hasActiveProvider ? (
           <>
             <span className="prompt-model-btn-logo">
-              {getProviderLogo(providerId, 16)}
+              <ProviderLogo id={providerId} size={16} />
             </span>
             <span className="prompt-model-btn-name">
               {formattedCurrent?.title || currentModelId}
@@ -358,7 +373,7 @@ export function PromptModelPicker({ onOpenSettings, className = '' }: PromptMode
               {/* Header with Provider Name */}
               <div className="prompt-model-menu-header">
                 <div className="prompt-model-provider-title">
-                  <span className="prompt-model-header-logo">{getProviderLogo(providerId, 15)}</span>
+                  <span className="prompt-model-header-logo"><ProviderLogo id={providerId} size={15} /></span>
                   <span className="prompt-model-header-text">{providerName}</span>
                 </div>
               </div>
@@ -432,7 +447,7 @@ export function PromptModelPicker({ onOpenSettings, className = '' }: PromptMode
                         className="prompt-model-provider-switch-item"
                         onClick={() => handleSelectProvider(p.id, p.selected_model)}
                       >
-                        <span className="prompt-model-switch-logo">{getProviderLogo(p.id, 14)}</span>
+                        <span className="prompt-model-switch-logo"><ProviderLogo id={p.id} size={14} /></span>
                         <span className="prompt-model-switch-name">{p.name}</span>
                         <span className="prompt-model-switch-count">
                           {p.models?.length ? `${p.models.length} models` : 'Ready'}
@@ -459,7 +474,7 @@ export function PromptModelPicker({ onOpenSettings, className = '' }: PromptMode
                     className="prompt-model-provider-switch-item"
                     onClick={() => handleSelectProvider(p.id, p.selected_model)}
                   >
-                    <span className="prompt-model-switch-logo">{getProviderLogo(p.id, 16)}</span>
+                    <span className="prompt-model-switch-logo"><ProviderLogo id={p.id} size={16} /></span>
                     <span className="prompt-model-switch-name">{p.name}</span>
                     <span className="prompt-model-switch-count">
                       {p.selected_model || (p.models?.length ? `${p.models.length} models` : 'Activate')}

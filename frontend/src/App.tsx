@@ -1,171 +1,173 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import sunSphereImage from './assets/sun-sphere.webp'
-import { createDeferredComponent } from './utils/deferredComponent'
+// layout.css first: liquid-glass.css must load after it, as the shell's glass surfaces expect.
 import './styles/layout.css'
+import { LiquidGlass } from './components/LiquidGlass'
+import { createDeferredComponent } from './utils/deferredComponent'
+import { cancelFrameTask, wakeFrameTask, type FrameTask } from './utils/frameLoop'
+import { settleSpring, spring, springAtRest, stepSpring } from './utils/spring'
 
+/** The capsule's padding around the drop, on each side. */
+const SLIDE_INSET = 7
+/** A press is a drag once it has moved this far. */
+const DRAG_THRESHOLD = 3
+/** How far along the track, as a fraction, a drag must reach to start. */
+const START_AT = 0.95
+
+/**
+ * "Get started" as Liquid Glass: a glass capsule (refracting the orb behind
+ * it) with a drop of glass for the handle. The drop runs on springs in the
+ * loop all glass shares (utils/frameLoop), so a frame writes one transform and
+ * one opacity and never measures layout. Dragged (from the drop or anywhere
+ * on the capsule), it follows the pointer closely, stretches along its path
+ * with speed and swells under the press; let go short of the end, it springs
+ * home past rest and settles. A click, or Enter/Space, sends it sliding across
+ * on its own before the app starts.
+ */
 function SlideStartButton({ onStart }: { onStart: () => void }) {
-  const containerRef = useRef<HTMLButtonElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
   const handleRef = useRef<HTMLSpanElement>(null)
   const labelRef = useRef<HTMLSpanElement>(null)
+  const onStartRef = useRef(onStart)
 
-  const [dragOffset, setDragOffset] = useState(0)
-  const [isDragging, setIsDragging] = useState(false)
-  const startXRef = useRef(0)
-  const maxOffsetRef = useRef(0)
-  const dragOffsetRef = useRef(0)
-  const dragAnimationFrameRef = useRef<number | null>(null)
+  useEffect(() => {
+    onStartRef.current = onStart
+  }, [onStart])
 
-  const updateDragVisual = useCallback((offset: number) => {
-    dragOffsetRef.current = offset
+  useEffect(() => {
+    const button = buttonRef.current
+    const handle = handleRef.current
+    const label = labelRef.current
+    if (!button || !handle || !label) return
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+    // Kept current by the ResizeObserver below, so no frame has to measure layout.
+    let track = 0
+    const measure = () => {
+      track = Math.max(0, button.clientWidth - handle.offsetWidth - SLIDE_INSET * 2)
+    }
+    measure()
 
-    if (dragAnimationFrameRef.current !== null) return
+    const x = spring(0)
+    let drag: { startX: number; startHandle: number; moved: boolean } | null = null
+    let suppressClick = false
+    // 'drag': started by dragging to the end, already announced; 'slide': a
+    // click, announced once the drop arrives.
+    let finishing: 'drag' | 'slide' | null = null
+    let lastTime = 0
 
-    dragAnimationFrameRef.current = requestAnimationFrame(() => {
-      dragAnimationFrameRef.current = null
-      const currentOffset = dragOffsetRef.current
-      const maxOffset = maxOffsetRef.current
+    const finish = () => {
+      if (finishing === 'drag') return
+      finishing = 'drag'
+      onStartRef.current()
+    }
 
-      if (handleRef.current) {
-        handleRef.current.style.transform = `translateX(${currentOffset}px)`
+    const task: FrameTask = {
+      write: (time) => {
+        const seconds = lastTime ? (time - lastTime) / 1000 : 1 / 60
+        lastTime = time
+        if (finishing) x.target = track
+        if (reducedMotion.matches) settleSpring(x)
+        else if (drag) stepSpring(x, seconds, 900, 50)
+        else if (finishing) stepSpring(x, seconds, 260, 24)
+        else stepSpring(x, seconds, 300, 15)
+
+        // Speed stretches the drop along its path and thins it, volume kept roughly constant.
+        const stretch = Math.min(Math.abs(x.velocity) / 1800, 0.35)
+        handle.style.transform = `translateX(${x.value.toFixed(2)}px) scale(${(1 + stretch).toFixed(4)}, ${(1 - stretch * 0.45).toFixed(4)})`
+        label.style.opacity = track > 0 ? Math.max(0, Math.min(1, 1 - x.value / (track * 0.7))).toFixed(3) : '1'
+
+        if (finishing === 'slide' && x.value >= track * 0.97) {
+          finishing = 'drag'
+          onStartRef.current()
+        }
+        if (drag || !springAtRest(x, 0.05)) return true
+        lastTime = 0
+        return false
+      },
+    }
+    const wake = () => wakeFrameTask(task)
+
+    // A drag ends in a click on the button (pressed and released over it).
+    // That click belongs to the drag, so it is swallowed; it fires in the same
+    // task as the release, so a stray flag can't eat a later click or keypress.
+    const spendClick = () => {
+      suppressClick = true
+      window.setTimeout(() => {
+        suppressClick = false
+      })
+    }
+
+    const handleDown = (event: PointerEvent) => {
+      if (event.button !== 0 || finishing) return
+      drag = { startX: event.clientX, startHandle: x.value, moved: false }
+      button.classList.add('start-button--dragging')
+      wake()
+    }
+    const handleMove = (event: PointerEvent) => {
+      if (!drag) return
+      const delta = event.clientX - drag.startX
+      if (Math.abs(delta) > DRAG_THRESHOLD) drag.moved = true
+      if (!drag.moved) return
+      x.target = Math.min(track, Math.max(0, drag.startHandle + delta))
+      if (x.target >= track * START_AT) {
+        drag = null
+        spendClick()
+        button.classList.remove('start-button--dragging')
+        finish()
       }
+      wake()
+    }
+    const handleUp = () => {
+      if (!drag) return
+      // Short of the end the drop springs home; the button's click, if any, is spent.
+      if (drag.moved) spendClick()
+      drag = null
+      x.target = 0
+      button.classList.remove('start-button--dragging')
+      wake()
+    }
+    const handleClick = () => {
+      if (suppressClick || finishing) return
+      finishing = 'slide'
+      wake()
+    }
 
-      if (labelRef.current && maxOffset > 0) {
-        labelRef.current.style.opacity = String(Math.max(0, 1 - currentOffset / (maxOffset * 0.7)))
-      }
+    button.addEventListener('pointerdown', handleDown)
+    button.addEventListener('click', handleClick)
+    document.addEventListener('pointermove', handleMove, { passive: true })
+    document.addEventListener('pointerup', handleUp)
+    document.addEventListener('pointercancel', handleUp)
+    const resize = new ResizeObserver(() => {
+      measure()
+      wake()
     })
+    resize.observe(button)
+    return () => {
+      button.removeEventListener('pointerdown', handleDown)
+      button.removeEventListener('click', handleClick)
+      document.removeEventListener('pointermove', handleMove)
+      document.removeEventListener('pointerup', handleUp)
+      document.removeEventListener('pointercancel', handleUp)
+      resize.disconnect()
+      cancelFrameTask(task)
+    }
   }, [])
 
-  // Track global drag events to ensure smooth dragging outside the button boundaries
-  useEffect(() => {
-    if (!isDragging) return
-
-    const handleMouseMove = (e: MouseEvent) => {
-      const deltaX = e.clientX - startXRef.current
-      const newOffset = Math.max(0, Math.min(maxOffsetRef.current, deltaX))
-      updateDragVisual(newOffset)
-
-      if (newOffset >= maxOffsetRef.current * 0.95) {
-        setIsDragging(false)
-        setDragOffset(maxOffsetRef.current)
-        onStart()
-      }
-    }
-
-    const handleTouchMove = (e: TouchEvent) => {
-      if (e.touches.length === 0) return
-      const deltaX = e.touches[0].clientX - startXRef.current
-      const newOffset = Math.max(0, Math.min(maxOffsetRef.current, deltaX))
-      updateDragVisual(newOffset)
-
-      if (newOffset >= maxOffsetRef.current * 0.95) {
-        setIsDragging(false)
-        setDragOffset(maxOffsetRef.current)
-        onStart()
-      }
-    }
-
-    const handleDragEnd = () => {
-      setIsDragging(false)
-      setDragOffset(0)
-    }
-
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleDragEnd)
-    window.addEventListener('touchmove', handleTouchMove)
-    window.addEventListener('touchend', handleDragEnd)
-
-    return () => {
-      if (dragAnimationFrameRef.current !== null) {
-        cancelAnimationFrame(dragAnimationFrameRef.current)
-        dragAnimationFrameRef.current = null
-      }
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleDragEnd)
-      window.removeEventListener('touchmove', handleTouchMove)
-      window.removeEventListener('touchend', handleDragEnd)
-    }
-  }, [isDragging, onStart, updateDragVisual])
-
-  const handleStartDrag = (clientX: number) => {
-    if (!containerRef.current || !handleRef.current) return
-    const containerRect = containerRef.current.getBoundingClientRect()
-    const handleRect = handleRef.current.getBoundingClientRect()
-
-    // 14px accounts for padding around the circle inside the button border
-    maxOffsetRef.current = containerRect.width - handleRect.width - 14
-    startXRef.current = clientX
-    setIsDragging(true)
-  }
-
-  const onMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0) return // Left click only
-    handleStartDrag(e.clientX)
-  }
-
-  const onTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length === 0) return
-    handleStartDrag(e.touches[0].clientX)
-  }
-
-  const handleButtonClick = () => {
-    // If they just clicked without dragging, slide and trigger transition
-    if (!isDragging && dragOffset === 0) {
-      if (containerRef.current && handleRef.current) {
-        const containerRect = containerRef.current.getBoundingClientRect()
-        const handleRect = handleRef.current.getBoundingClientRect()
-        const target = containerRect.width - handleRect.width - 14
-        setDragOffset(target)
-      }
-      setTimeout(() => {
-        onStart()
-      }, 250)
-    }
-  }
-
-  const handleStyle: React.CSSProperties = {
-    transform: `translateX(${dragOffset}px)`,
-    transition: isDragging ? 'none' : 'transform 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-    cursor: isDragging ? 'grabbing' : 'grab',
-  }
-
-  let textOpacity = 1
-  if (maxOffsetRef.current > 0) {
-    textOpacity = Math.max(0, 1 - dragOffset / (maxOffsetRef.current * 0.7))
-  }
-
   return (
-    <button
-      ref={containerRef}
-      className="start-button"
-      type="button"
-      onClick={handleButtonClick}
-      style={{
-        position: 'absolute',
-        zIndex: 2,
-        userSelect: 'none',
-      }}
-    >
-      <span
-        ref={handleRef}
-        className="start-button__circle"
-        onMouseDown={onMouseDown}
-        onTouchStart={onTouchStart}
-        style={handleStyle}
-        aria-hidden="true"
-      >
-        →
-      </span>
-      <span
-        ref={labelRef}
-        style={{
-          opacity: textOpacity,
-          transition: isDragging ? 'none' : 'opacity 0.2s ease',
-          pointerEvents: 'none',
-        }}
-      >
-        Get started
-      </span>
-    </button>
+    <div className="start-button-anchor">
+      <button ref={buttonRef} className="start-button lg-host" type="button">
+        <LiquidGlass refraction={44} bezel={16} blur={5} aberration={0} elasticity={0.16} />
+        <span ref={handleRef} className="start-button__handle" aria-hidden="true">
+          <span className="start-button__drop lg-host">
+            <LiquidGlass refraction={26} bezel={12} blur={2} saturation={150} aberration={0} />
+            <span className="start-button__arrow">→</span>
+          </span>
+        </span>
+        <span ref={labelRef} className="start-button__label">
+          Get started
+        </span>
+      </button>
+    </div>
   )
 }
 
@@ -182,10 +184,10 @@ function StartupScreen({
   // Cancel the mouse-follow rAF before the transition frame paints. This keeps
   // it from competing with the solar-system burst as the swipe completes.
   useLayoutEffect(() => {
+    // Captured once, so the cleanup resets the same node the loop moved.
+    const solarSystem = solarSystemRef.current
     if (isTransitioning) {
-      if (solarSystemRef.current) {
-        solarSystemRef.current.style.removeProperty('transform')
-      }
+      solarSystem?.style.removeProperty('transform')
       return
     }
 
@@ -210,8 +212,8 @@ function StartupScreen({
       currentX += deltaX * 0.08
       currentY += deltaY * 0.08
 
-      if (solarSystemRef.current) {
-        solarSystemRef.current.style.transform = `translate3d(${currentX.toFixed(2)}px, ${currentY.toFixed(2)}px, 0)`
+      if (solarSystem) {
+        solarSystem.style.transform = `translate3d(${currentX.toFixed(2)}px, ${currentY.toFixed(2)}px, 0)`
       }
 
       if (Math.abs(deltaX) > SETTLE_THRESHOLD_PX || Math.abs(deltaY) > SETTLE_THRESHOLD_PX) {
@@ -236,9 +238,7 @@ function StartupScreen({
       active = false
       window.removeEventListener('mousemove', handleMouseMove)
       if (rafId !== null) cancelAnimationFrame(rafId)
-      if (solarSystemRef.current) {
-        solarSystemRef.current.style.removeProperty('transform')
-      }
+      solarSystem?.style.removeProperty('transform')
     }
   }, [isTransitioning])
 

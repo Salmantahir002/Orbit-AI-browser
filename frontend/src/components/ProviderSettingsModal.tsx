@@ -13,7 +13,29 @@ import {
   setActiveStoredProvider,
   testProviderConnection,
 } from '../services/providerApiClient'
-import { getProviderLogo } from './ProviderIcons'
+import { LiquidGlass } from './LiquidGlass'
+import { ProviderLogo } from './ProviderIcons'
+
+/**
+ * Liquid Glass, as in the assistant panel and the report drawers: the dialog
+ * is a pane of frosted glass over the page (the shell freezes a frame of the
+ * page in place of the hidden guest view while it is open), and its controls
+ * and cards are LiquidGlass surfaces floating on the pane. Buttons and cards
+ * inside the scrolling body are frosted (refraction 0): their backdrop is the
+ * blurred pane, which refraction would barely bend, and every refracting
+ * surface re-runs its filter on each scrolled frame.
+ */
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+function PillGlass() {
+  return <LiquidGlass refraction={0} blur={5} elasticity={0.16} />
+}
+
+function CardGlass() {
+  return <LiquidGlass refraction={0} blur={8} elasticity={0.05} />
+}
 
 interface ProviderSettingsModalProps {
   isOpen: boolean
@@ -213,13 +235,28 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
     }
   }
 
-  useEffect(() => {
+  // Each opening starts on the providers list with a clean form. The dialog
+  // stays mounted while closed, so this is adjusted during render when isOpen
+  // changes (React's pattern for state derived from changing props).
+  const [wasOpen, setWasOpen] = useState(isOpen)
+  if (isOpen !== wasOpen) {
+    setWasOpen(isOpen)
     if (isOpen) {
-      refreshData()
       setConnectingPreset(null)
       setFormError('')
       setTestResult(null)
     }
+  }
+
+  // Reload the saved providers on each opening; set from the load's callback.
+  useEffect(() => {
+    if (!isOpen) return undefined
+    let subscribed = true
+    getAllStoredProviders().then(
+      (stored) => { if (subscribed) setSavedProviders(stored) },
+      () => undefined,
+    )
+    return () => { subscribed = false }
   }, [isOpen])
 
   // Open Connect Form
@@ -343,8 +380,8 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
         message: `Successfully fetched ${models.length} model${models.length === 1 ? '' : 's'}. Ready to connect.`,
         models,
       })
-    } catch (err: any) {
-      setFormError(err.message || 'Failed to fetch models')
+    } catch (err) {
+      setFormError(errorMessage(err) || 'Failed to fetch models')
       setFetchedModels([])
     } finally {
       setIsFetchingModels(false)
@@ -410,12 +447,12 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
           )
         }
       }
-    } catch (err: any) {
+    } catch (err) {
       setTestResult({
         success: false,
         latency_ms: 0,
         models_count: 0,
-        message: err.message || 'Connection test failed',
+        message: errorMessage(err) || 'Connection test failed',
         models: [],
       })
     } finally {
@@ -503,8 +540,8 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
       onProviderChanged?.()
       window.dispatchEvent(new CustomEvent('promptguard:providers-updated'))
       onClose()
-    } catch (err: any) {
-      setFormError(`Connection failed: ${err.message || err}`)
+    } catch (err) {
+      setFormError(`Connection failed: ${errorMessage(err) || err}`)
     } finally {
       setIsSaving(false)
     }
@@ -513,23 +550,27 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
   if (!isOpen) return null
 
   return (
-    <div className="oc-modal-overlay" onClick={onClose}>
+    <div className="oc-modal">
+      {/* A sibling of the dialog, not its parent: its blur would otherwise
+          stand between the dialog's glass and the page. */}
+      <div className="oc-modal-overlay" onClick={onClose} aria-hidden="true" />
       <div
         className="oc-modal-container"
-        onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="oc-dialog-title"
       >
+        <div className="oc-modal__glass" aria-hidden="true" />
         {/* Top Header Bar */}
         <div className="oc-header-bar">
           {connectingPreset ? (
             <button
               type="button"
-              className="oc-btn-back"
+              className="oc-btn-back lg-host"
               onClick={() => setConnectingPreset(null)}
               aria-label="Back to providers"
             >
+              <LiquidGlass refraction={44} bezel={12} blur={5} aberration={0} elasticity={0.16} />
               <ArrowLeftIcon />
               <span>Back to Providers</span>
             </button>
@@ -539,15 +580,18 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
             </h1>
           )}
 
-          <button
-            type="button"
-            className="oc-close-btn"
-            onClick={onClose}
-            aria-label="Close dialog"
-            title="Close"
-          >
-            <CloseIcon />
-          </button>
+          <div className="oc-header-actions lg-host">
+            <LiquidGlass refraction={56} bezel={14} blur={6} elasticity={0.22} />
+            <button
+              type="button"
+              className="oc-close-btn lg-press"
+              onClick={onClose}
+              aria-label="Close dialog"
+              title="Close"
+            >
+              <CloseIcon />
+            </button>
+          </div>
         </div>
 
         {/* Scrollable Content Body */}
@@ -556,7 +600,7 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
             /* CONFIGURE / CONNECT FORM VIEW */
             <div className="oc-connect-view">
               <div className="oc-connect-header">
-                <span className="oc-provider-logo">{getProviderLogo(connectingPreset.id, 28)}</span>
+                <span className="oc-provider-logo"><ProviderLogo id={connectingPreset.id} size={28} /></span>
                 <div>
                   <h2 className="oc-connect-title">{connectingPreset.name}</h2>
                   <p className="oc-connect-desc">{connectingPreset.description}</p>
@@ -565,7 +609,8 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
 
               <form className="oc-form" onSubmit={handleSaveConnect}>
                 {connectingPreset.isCustom ? (
-                  <div className="oc-custom-fields">
+                  <div className="oc-custom-fields lg-host">
+                    <CardGlass />
                     <div className="oc-form-row">
                       <div className="oc-form-group">
                         <label className="oc-label">Provider ID</label>
@@ -721,19 +766,21 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
                 <div className="oc-action-row">
                   <button
                     type="button"
-                    className="oc-btn-secondary"
+                    className="oc-btn-secondary lg-host"
                     onClick={handleFetchModels}
                     disabled={isFetchingModels || isTesting}
                   >
+                    <PillGlass />
                     <RefreshIcon spinning={isFetchingModels} />
                     <span>{isFetchingModels ? 'Fetching Models...' : 'Fetch Models'}</span>
                   </button>
                   <button
                     type="button"
-                    className="oc-btn-secondary"
+                    className="oc-btn-secondary lg-host"
                     onClick={handleTestConnection}
                     disabled={isTesting || isFetchingModels}
                   >
+                    <PillGlass />
                     <span>{isTesting ? 'Testing...' : 'Test Connection'}</span>
                   </button>
                 </div>
@@ -787,16 +834,18 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
                 <div className="oc-form-footer">
                   <button
                     type="button"
-                    className="oc-btn-cancel"
+                    className="oc-btn-cancel lg-host"
                     onClick={() => setConnectingPreset(null)}
                   >
+                    <PillGlass />
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="oc-btn-submit"
+                    className="oc-btn-submit lg-host"
                     disabled={isSaving}
                   >
+                    <PillGlass />
                     {isSaving ? 'Connecting...' : 'Save & Activate'}
                   </button>
                 </div>
@@ -809,14 +858,15 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
               {savedProviders.length > 0 ? (
                 <div className="oc-section">
                   <h2 className="oc-section-title">Connected providers</h2>
-                  <div className="oc-card-group">
+                  <div className="oc-card-group lg-host">
+                    <CardGlass />
                     {savedProviders.map((provider) => {
                       const isActive = Boolean(provider.is_active)
                       const modelCount = provider.models?.length || 0
                       return (
                         <div key={provider.id} className="oc-provider-row">
                           <div className="oc-provider-info">
-                            <span className="oc-provider-logo">{getProviderLogo(provider.id, 20)}</span>
+                            <span className="oc-provider-logo"><ProviderLogo id={provider.id} size={20} /></span>
                             <div className="oc-provider-details">
                               <div className="oc-provider-name-row">
                                 <span className="oc-provider-name">{provider.name}</span>
@@ -838,17 +888,19 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
                             {!isActive ? (
                               <button
                                 type="button"
-                                className="oc-btn-connect"
+                                className="oc-btn-connect lg-host"
                                 onClick={() => handleSetActive(provider.id, provider.selected_model)}
                               >
+                                <PillGlass />
                                 Set Active
                               </button>
                             ) : null}
                             <button
                               type="button"
-                              className="oc-btn-disconnect"
+                              className="oc-btn-disconnect lg-host"
                               onClick={() => handleDisconnect(provider.id)}
                             >
+                              <PillGlass />
                               Disconnect
                             </button>
                           </div>
@@ -863,11 +915,12 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
               {availablePopularPresets.length > 0 ? (
                 <div className="oc-section">
                   <h2 className="oc-section-title">Popular providers</h2>
-                  <div className="oc-card-group">
+                  <div className="oc-card-group lg-host">
+                    <CardGlass />
                     {availablePopularPresets.map((preset) => (
                       <div key={preset.id} className="oc-provider-row">
                         <div className="oc-provider-info">
-                          <span className="oc-provider-logo">{getProviderLogo(preset.id, 20)}</span>
+                          <span className="oc-provider-logo"><ProviderLogo id={preset.id} size={20} /></span>
                           <div className="oc-provider-details">
                             <div className="oc-provider-name-row">
                               <span className="oc-provider-name">{preset.name}</span>
@@ -881,9 +934,10 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
                         <div className="oc-row-actions">
                           <button
                             type="button"
-                            className="oc-btn-connect"
+                            className="oc-btn-connect lg-host"
                             onClick={() => handleOpenConnect(preset)}
                           >
+                            <PillGlass />
                             <PlusIcon />
                             <span>Connect</span>
                           </button>

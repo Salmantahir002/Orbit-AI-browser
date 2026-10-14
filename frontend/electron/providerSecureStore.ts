@@ -35,6 +35,19 @@ export interface ClientProviderView {
   is_active: boolean
 }
 
+/** What the renderer sends to save a provider; the plain API key never leaves main once stored. */
+export interface ProviderSaveRequest {
+  id: string
+  name: string
+  provider_type: ProviderType
+  base_url?: string
+  api_key?: string
+  verify_ssl?: boolean
+  selected_model?: string
+  models?: Array<{ id: string; name: string; description?: string }>
+  set_active?: boolean
+}
+
 export interface StoredSettingsFile {
   active_provider_id: string | null
   active_model?: string | null
@@ -177,17 +190,7 @@ export class ProviderSecureStore {
   /**
    * Saves a provider configuration with OS-level encrypted key.
    */
-  saveProvider(config: {
-    id: string
-    name: string
-    provider_type: ProviderType
-    base_url?: string
-    api_key?: string
-    verify_ssl?: boolean
-    selected_model?: string
-    models?: Array<{ id: string; name: string; description?: string }>
-    set_active?: boolean
-  }): ClientProviderView {
+  saveProvider(config: ProviderSaveRequest): ClientProviderView {
     const data = this.load()
     const existing = data.providers[config.id]
 

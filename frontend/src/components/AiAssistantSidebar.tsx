@@ -1,14 +1,18 @@
 import { memo, useRef, useState, useEffect } from 'react'
-import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react'
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react'
 import { checkPrompt, chatWithLlm, type ChatPageContext } from '../services/backendApiClient'
 import { extractPageContent } from '../services/pageContentExtractor'
 import type { BrowserWebViewHandle } from './BrowserWebView'
 import type { AnalysisDetails } from '../types/analysisDetailsTypes'
 import type { ChatAttachment, ChatHistoryTurn, LlmResponse, SecurityCheckResponse } from '../types/securityTypes'
 import { AgentModePanel } from './AgentModePanel'
+import { GlassModeSwitch } from './GlassModeSwitch'
 import { KimoMascot } from './KimoMascot'
+import { LiquidGlass } from './LiquidGlass'
 import { MarkdownMessage } from './MarkdownMessage'
 import { PromptInputBox } from './PromptInputBox'
+import { trackDockHeight } from '../utils/floatingDock'
+import { usePageBackdrop } from '../utils/usePageBackdrop'
 
 type SidebarMode = 'chat' | 'agent'
 
@@ -52,7 +56,8 @@ type AiAssistantSidebarProps = {
   activeTargetId?: number | null
   currentUrl?: string
   activeTabTitle?: string
-  activeWebviewHandle?: BrowserWebViewHandle | null
+  /** Reads the active tab's webview handle when it is needed, not at render. */
+  getActiveWebviewHandle?: () => BrowserWebViewHandle | null
   /** Opens a tab for the agent's `open_tab` tool; resolves to its target id. */
   onOpenTab?: (url?: string) => Promise<number | null>
   /** Current panel width in px; owned by the shell, which sets the grid column. */
@@ -127,7 +132,7 @@ export const AiAssistantSidebar = memo(function AiAssistantSidebar({
   activeTargetId = null,
   currentUrl = '',
   activeTabTitle = '',
-  activeWebviewHandle = null,
+  getActiveWebviewHandle,
   onOpenTab,
   width = 400,
   onWidthChange,
@@ -151,6 +156,12 @@ export const AiAssistantSidebar = memo(function AiAssistantSidebar({
 
   const hasActivePage = Boolean(currentUrl && currentUrl !== 'about:blank' && !currentUrl.startsWith('about:'))
   const isPageContextAttached = hasActivePage && detachedUrl !== currentUrl
+
+  const panelRef = useRef<HTMLElement | null>(null)
+  // A drag-resize hides the guest view; sampling it then would catch a blank frame.
+  const resizingRef = useRef(false)
+  const backdropFrames = usePageBackdrop(panelRef, activeTargetId, !hasActivePage, resizingRef)
+  const backdrop = backdropFrames[backdropFrames.length - 1]
 
   // Automatically sync active chat session to state and localStorage
   useEffect(() => {
@@ -212,6 +223,7 @@ export const AiAssistantSidebar = memo(function AiAssistantSidebar({
     setClearSignal((v) => v + 1)
 
     let pageContext: ChatPageContext | undefined = undefined
+    const activeWebviewHandle = getActiveWebviewHandle?.() ?? null
     if (isPageContextAttached && activeWebviewHandle) {
       try {
         const extracted = await extractPageContent(activeWebviewHandle)
@@ -300,7 +312,9 @@ export const AiAssistantSidebar = memo(function AiAssistantSidebar({
       const next = prev.filter((s) => s.id !== sessionId)
       try {
         window.localStorage.setItem(CHAT_SESSIONS_STORAGE_KEY, JSON.stringify(next))
-      } catch {}
+      } catch {
+        // Storage unavailable or full: the deletion still applies for this session.
+      }
       return next
     })
     if (activeSessionId === sessionId) {
@@ -313,7 +327,9 @@ export const AiAssistantSidebar = memo(function AiAssistantSidebar({
     setSessions([])
     try {
       window.localStorage.removeItem(CHAT_SESSIONS_STORAGE_KEY)
-    } catch {}
+    } catch {
+      // Storage unavailable: the history is still cleared for this session.
+    }
     setActiveSessionId(`session-${Date.now()}`)
     setMessages([])
   }
@@ -328,6 +344,7 @@ export const AiAssistantSidebar = memo(function AiAssistantSidebar({
 
     const handle = event.currentTarget
     handle.setPointerCapture(event.pointerId)
+    resizingRef.current = true
     onResizingChange?.(true)
 
     const handleMove = (moveEvent: PointerEvent) => {
@@ -337,6 +354,7 @@ export const AiAssistantSidebar = memo(function AiAssistantSidebar({
       handle.removeEventListener('pointermove', handleMove)
       handle.removeEventListener('pointerup', handleEnd)
       handle.removeEventListener('pointercancel', handleEnd)
+      resizingRef.current = false
       onResizingChange?.(false)
     }
 
@@ -359,7 +377,17 @@ export const AiAssistantSidebar = memo(function AiAssistantSidebar({
   const canStartNewSession = mode === 'agent' || hasMessages || isChecking
 
   return (
-    <aside className="assistant-panel" aria-label="Kimo panel">
+    <aside
+      ref={panelRef}
+      className="assistant-panel"
+      aria-label="Kimo panel"
+      style={backdrop ? ({ '--backdrop-luminance': backdrop.luminance.toFixed(3) } as CSSProperties) : undefined}
+    >
+      {/* The page beside the panel, blurred: the glass panel's backdrop. The
+          previous frame stays beneath while the new one fades in. */}
+      <div className="assistant-backdrop" aria-hidden="true">
+        {backdropFrames.map((frame) => <img key={frame.key} src={frame.image} alt="" draggable={false} />)}
+      </div>
       {/* Drag edge. `separator` + arrow keys keeps the panel resizable without
           a pointer. */}
       <div
@@ -383,53 +411,35 @@ export const AiAssistantSidebar = memo(function AiAssistantSidebar({
         <div className="assistant-header-right">
           {/* Chat and agent mode are separate surfaces on purpose: one answers
               questions, the other operates the browser. */}
-          <div className="assistant-mode-switch" role="tablist" aria-label="Assistant mode">
+          <GlassModeSwitch mode={mode} onChange={setMode} />
+
+          <div className="assistant-header-actions lg-host">
+            <LiquidGlass refraction={56} bezel={14} blur={6} elasticity={0.22} />
+            {mode === 'chat' && (
+              <button
+                className={`assistant-new-button lg-press ${isHistoryOpen ? 'assistant-new-button--active' : ''}`}
+                type="button"
+                title={isHistoryOpen ? 'Back to chat' : 'Chat history'}
+                aria-label={isHistoryOpen ? 'Back to chat' : 'Chat history'}
+                onClick={() => setIsHistoryOpen((v) => !v)}
+              >
+                <HistoryIcon />
+              </button>
+            )}
+
+            {/* One button, scoped to the visible surface: the other mode's session
+                is left untouched behind it. */}
             <button
-              className={`assistant-mode-tab ${mode === 'chat' ? 'assistant-mode-tab--active' : ''}`}
+              className="assistant-new-button lg-press"
               type="button"
-              role="tab"
-              aria-selected={mode === 'chat'}
-              onClick={() => setMode('chat')}
+              disabled={!canStartNewSession}
+              title={mode === 'chat' ? 'New chat' : 'New agent task'}
+              aria-label={mode === 'chat' ? 'New chat' : 'New agent task'}
+              onClick={handleNewSession}
             >
-              Chat
-            </button>
-            <button
-              className={`assistant-mode-tab ${mode === 'agent' ? 'assistant-mode-tab--active' : ''}`}
-              type="button"
-              role="tab"
-              aria-selected={mode === 'agent'}
-              onClick={() => setMode('agent')}
-            >
-              Agent
+              <NewSessionIcon />
             </button>
           </div>
-
-          <span className="assistant-header-divider" aria-hidden="true" />
-
-          {mode === 'chat' && (
-            <button
-              className={`assistant-new-button ${isHistoryOpen ? 'assistant-new-button--active' : ''}`}
-              type="button"
-              title={isHistoryOpen ? 'Back to chat' : 'Chat history'}
-              aria-label={isHistoryOpen ? 'Back to chat' : 'Chat history'}
-              onClick={() => setIsHistoryOpen((v) => !v)}
-            >
-              <HistoryIcon />
-            </button>
-          )}
-
-          {/* One button, scoped to the visible surface: the other mode's session
-              is left untouched behind it. */}
-          <button
-            className="assistant-new-button"
-            type="button"
-            disabled={!canStartNewSession}
-            title={mode === 'chat' ? 'New chat' : 'New agent task'}
-            aria-label={mode === 'chat' ? 'New chat' : 'New agent task'}
-            onClick={handleNewSession}
-          >
-            <NewSessionIcon />
-          </button>
         </div>
       </div>
 
@@ -633,8 +643,8 @@ export const AiAssistantSidebar = memo(function AiAssistantSidebar({
         </div>
       )}
 
-      {/* Input Area */}
-      <div className="chat-input-area">
+      {/* Input Area: floats over the transcript, which scrolls on beneath the glass. */}
+      <div className="chat-input-area" ref={trackDockHeight}>
         <PromptInputBox
           disabled={isChecking}
           onSubmit={handlePromptSubmit}

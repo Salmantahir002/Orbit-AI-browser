@@ -25,6 +25,7 @@ async function requestJson<TResponse>(path: string, init?: RequestInit): Promise
   } catch (err) {
     throw new Error(
       `Backend is not reachable (${err instanceof Error ? err.message : 'connection refused'}). Start Electron with npm run electron:start or run backend on port 8000.`,
+      { cause: err },
     )
   }
 

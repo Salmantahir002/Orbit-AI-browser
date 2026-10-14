@@ -201,50 +201,95 @@
   will-change: transform;
 }
 
-.start-button {
+/* Places the slider. The button's own transform belongs to LiquidGlass's
+   springs, so the centring and the exit animation live out here. */
+.start-button-anchor {
   position: absolute;
   z-index: 2;
   top: 58%;
   left: 50%;
+  transform: translate(-50%, -50%);
+  will-change: transform;
+}
+
+/* "Get started" in Liquid Glass (see SlideStartButton): a glass capsule that
+   refracts the orb behind it, with a drop of glass for the handle. No opacity
+   or will-change: opacity on it or its ancestors: either would cut the glass
+   off from the orb (the backdrop stops at the nearest such ancestor). */
+/* Doubled classes on the glass hosts: liquid-glass.css loads after this sheet
+   and sets the default tint and transition. */
+.start-button.lg-host {
   display: inline-flex;
   align-items: center;
   gap: 22px;
   min-width: 204px;
   height: 58px;
   padding: 7px 28px 7px 7px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 0;
   border-radius: 999px;
-  background: linear-gradient(180deg, #202734, #090b0f);
-  color: rgba(255, 255, 255, 0.86);
+  --lg-tint: rgba(10, 14, 18, 0.3);
+  color: rgba(255, 255, 255, 0.92);
   font-weight: 800;
-  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.42);
-  transform: translate(-50%, -50%);
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.5);
   cursor: pointer;
-  transition: transform 180ms ease, box-shadow 180ms ease;
+  touch-action: none;
+  user-select: none;
 }
 
-.start-button:hover {
-  transform: translate(-50%, -50%) scale(1.025);
-  box-shadow: 0 24px 58px rgba(0, 0, 0, 0.5);
+.start-button:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.7);
+  outline-offset: 3px;
 }
 
-.start-button__circle {
-  display: inline-grid;
-  place-items: center;
+/* Moved and stretched by SlideStartButton's spring. */
+.start-button__handle {
+  display: block;
+  flex-shrink: 0;
   width: 46px;
   height: 46px;
   border-radius: 50%;
-  background: #f6f6f3;
-  color: #121316;
+  cursor: grab;
+  will-change: transform;
+}
+
+.start-button--dragging,
+.start-button--dragging .start-button__handle {
+  cursor: grabbing;
+}
+
+/* The drop: brighter glass than the capsule, so the handle reads at a glance.
+   Lifted by a drag it clears, like the mode switch's lens. */
+.start-button__drop.lg-host {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  --lg-tint: rgba(255, 255, 255, 0.24);
+  color: #fff;
   font-size: 22px;
   font-weight: 900;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+}
+
+.start-button__drop .lg-tint {
+  transition: background 0.25s ease;
+}
+
+.start-button--dragging .start-button__drop {
+  --lg-tint: rgba(255, 255, 255, 0.12);
+}
+
+/* Faded by the slide, on its own layer so that costs no repaint. */
+.start-button__label {
+  pointer-events: none;
+  will-change: opacity;
 }
 
 /* These elements are all transformed or faded by the original exit
    animation. Promoting them while the welcome screen is visible avoids a
    layer-creation hitch on the first transition frame without changing it. */
 .welcome-title,
-.start-button,
 .startup-header,
 .startup-guide {
   will-change: transform, opacity;
@@ -590,29 +635,46 @@
   gap: 4px;
 }
 
-.scan-button {
+/* Scan and Ai Agent are Liquid Glass pills (see LiquidGlass): the glass
+   paints the fill and the rim, and its springs own the transform, so neither
+   sets a background or border, nor transitions transform. Each keeps its
+   colour as a tint of the glass (--lg-tint), which fades between states.
+   No opacity or filter on the pills themselves: either would cut the glass
+   off from what is behind it, so a disabled pill dims its contents instead. */
+.scan-button.lg-host,
+.assistant-pill.lg-host {
   height: 28px;
-  padding: 0 10px;
-  border: 1px solid rgba(52, 211, 153, 0.25);
+  border: 0;
   border-radius: 999px;
-  background: rgba(52, 211, 153, 0.08);
-  color: #34d399;
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color 0.15s ease, box-shadow 0.2s ease;
   display: inline-flex;
   align-items: center;
   gap: 5px;
 }
 
-.scan-button:hover {
-  background: rgba(52, 211, 153, 0.18);
-  border-color: rgba(52, 211, 153, 0.45);
+.scan-button .lg-tint,
+.assistant-pill .lg-tint {
+  transition: background 0.15s ease;
+}
+
+.scan-button.lg-host {
+  padding: 0 10px;
+  --lg-tint: rgba(52, 211, 153, 0.1);
+  color: #34d399;
+}
+
+.scan-button:hover:not(:disabled) {
+  --lg-tint: rgba(52, 211, 153, 0.2);
 }
 
 .scan-button:disabled {
   cursor: wait;
+}
+
+.scan-button:disabled > :not(.lg-layers) {
   opacity: 0.64;
 }
 
@@ -621,31 +683,27 @@
   height: 13px;
 }
 
-.assistant-pill {
-  height: 28px;
+.assistant-pill.lg-host {
   padding: 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 999px;
-  background: transparent;
+  --lg-tint: rgba(255, 255, 255, 0.05);
   color: rgba(255, 255, 255, 0.65);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
 }
 
 .assistant-pill:hover {
-  background: rgba(255, 255, 255, 0.06);
+  --lg-tint: rgba(255, 255, 255, 0.1);
   color: #fff;
 }
 
-.assistant-pill--active {
-  border-color: rgba(138, 180, 248, 0.35);
-  background: rgba(138, 180, 248, 0.12);
+.assistant-pill--active.lg-host,
+.assistant-pill--active.lg-host:hover {
+  --lg-tint: rgba(138, 180, 248, 0.16);
   color: #8ab4f8;
+}
+
+.scan-button:focus-visible,
+.assistant-pill:focus-visible {
+  outline: 2px solid rgba(138, 180, 248, 0.7);
+  outline-offset: 2px;
 }
 
 .assistant-pill svg {
@@ -1264,26 +1322,29 @@
   color: rgba(255, 255, 255, 0.58);
 }
 
-.homepage-start-button {
+/* "Start browsing" in Liquid Glass, amber-tinted (see LiquidGlass and
+   .start-button). Its springs own the transform, so hover lifts it with a
+   brighter tint rather than a move; and no filter or opacity on it, either of
+   which would cut the glass off from the page behind it. */
+.homepage-start-button.lg-host {
   margin-top: 34px;
   display: inline-flex;
   align-items: center;
   gap: 12px;
   min-height: 48px;
   padding: 0 19px 0 22px;
-  border: 1px solid rgba(252, 211, 77, 0.58);
+  border: 0;
   border-radius: 999px;
-  background: linear-gradient(135deg, rgba(251, 191, 36, 0.96), rgba(245, 158, 11, 0.88));
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.44);
-  color: #191406;
+  /* Clear glass with only a breath of amber; the amber lives in the label. */
+  --lg-tint: linear-gradient(135deg, rgba(251, 191, 36, 0.1), rgba(255, 255, 255, 0.03));
+  color: #fcd34d;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.45);
   cursor: pointer;
   font-family: 'Trebuchet MS', sans-serif;
   font-size: 13px;
   font-weight: 800;
   letter-spacing: 0.045em;
   text-transform: uppercase;
-  animation: homepage-button-pulse 2.6s ease-in-out infinite;
-  transition: transform 170ms ease, box-shadow 170ms ease, filter 170ms ease;
 }
 
 .homepage-start-button svg,
@@ -1293,10 +1354,8 @@
 }
 
 .homepage-start-button:hover {
-  animation-play-state: paused;
-  filter: brightness(1.06);
-  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.5);
-  transform: translateY(-2px);
+  --lg-tint: linear-gradient(135deg, rgba(251, 191, 36, 0.18), rgba(255, 255, 255, 0.06));
+  color: #fde68a;
 }
 
 .homepage-start-button svg {
@@ -1487,15 +1546,6 @@
   }
 }
 
-@keyframes homepage-button-pulse {
-  0%, 100% {
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.44);
-  }
-  50% {
-    box-shadow: 0 16px 42px rgba(251, 191, 36, 0.2), 0 0 0 6px rgba(251, 191, 36, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.5);
-  }
-}
-
 @keyframes homepage-button-arrow {
   0%, 100% {
     transform: translateX(0);
@@ -1543,8 +1593,19 @@
 /* The assistant surface is typeset in its own family (see --font-assistant):
    an interface grotesque, distinct from the browser chrome around it. Its
    surfaces, however, are the browser's own greys — the panel is part of the
-   window, not a differently-coloured app pinned to its side. */
+   window, not a differently-coloured app pinned to its side.
+
+   Liquid Glass: the panel is a pane of glass over a blurred frame of the page
+   beside it (.assistant-backdrop, in liquid-glass.css), and the header
+   controls and composer are glass floating over the content, which scrolls on
+   beneath them (--lg-top is the header's band, --lg-bottom the composer
+   dock's, published by trackDockHeight). The background below is only the
+   fallback for when no frame is available: the chrome's grey with two faint
+   glows of its own blue and periwinkle accents. */
 .assistant-panel {
+  --lg-top: 56px;
+  isolation: isolate;
+  box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.07);
   width: var(--assistant-width, 400px);
   min-width: var(--assistant-width, 400px);
   height: 100%;
@@ -1555,7 +1616,10 @@
   overflow: hidden;
   font-family: var(--font-assistant);
   letter-spacing: -0.006em;
-  background: #1a1d1f;
+  background:
+    radial-gradient(115% 55% at 100% 0%, rgba(138, 180, 248, 0.1), transparent 62%),
+    radial-gradient(100% 50% at 0% 100%, rgba(168, 177, 255, 0.09), transparent 66%),
+    #1f1f23;
   border-left: 1px solid rgba(255, 255, 255, 0.06);
   transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -1593,17 +1657,26 @@
   outline: 0;
 }
 
-/* Header Area */
+/* Header Area: no bar of its own. The title and the glass capsules float over
+   the content; only the capsules take the pointer, so the transcript beneath
+   stays scrollable between them. */
 .assistant-header {
-  position: relative;
-  z-index: 1;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  height: var(--lg-top);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 10px 14px 10px 18px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  background: #202225;
+  padding: 0 12px 0 16px;
+  pointer-events: none;
+}
+
+.assistant-header > * {
+  pointer-events: auto;
 }
 
 .assistant-header-right {
@@ -1613,15 +1686,10 @@
   flex-shrink: 0;
 }
 
-.assistant-header-divider {
-  width: 1px;
-  height: 18px;
-  background: rgba(255, 255, 255, 0.1);
-}
-
 /* Same shape and weight as the toolbar's round icon buttons, so the header
    reads as one family of controls with the chrome above it. */
 .assistant-new-button {
+  position: relative;
   width: 30px;
   height: 30px;
   display: inline-grid;
@@ -1630,9 +1698,8 @@
   border: 0;
   border-radius: 50%;
   background: transparent;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(255, 255, 255, 0.62);
   cursor: pointer;
-  transition: all 0.15s ease;
 }
 
 .assistant-new-button svg {
@@ -1641,12 +1708,12 @@
 }
 
 .assistant-new-button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.92);
 }
 
 .assistant-new-button:active:not(:disabled) {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .assistant-new-button:disabled {
@@ -1670,7 +1737,7 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: #1a1d1f;
+  padding-top: var(--lg-top);
 }
 
 .assistant-history-header {
@@ -1852,9 +1919,15 @@
   letter-spacing: -0.01em;
 }
 
+/* The session buttons share one glass capsule, as grouped toolbar controls
+   do on Apple's glass. */
 .assistant-header-actions {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: 2px;
+  height: 34px;
+  padding: 2px;
+  border-radius: 999px;
 }
 
 .assistant-icon-btn {
@@ -1882,7 +1955,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 36px 26px;
+  padding: calc(var(--lg-top) + 16px) 26px calc(var(--lg-bottom, 0px) + 16px);
   gap: 12px;
   text-align: center;
 }
@@ -1943,12 +2016,25 @@
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 18px 16px 14px;
+  padding: calc(var(--lg-top) + 6px) 16px calc(var(--lg-bottom, 0px) + 16px);
+  scroll-padding: var(--lg-top) 0 calc(var(--lg-bottom, 0px) + 16px);
   display: flex;
   flex-direction: column;
   gap: 18px;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+
+/* Scroll edge effect: content dims as it passes under the floating glass, so
+   the glass bends it without it competing with the controls on top. Two
+   fades, one per edge, intersected: a single gradient would need stops like
+   calc(100% - …), which Chromium paints as no mask at all. */
+.chat-messages,
+.agent-timeline {
+  mask-image:
+    linear-gradient(to bottom, transparent, rgba(0, 0, 0, 0.1) calc(var(--lg-top) - 12px), #000 calc(var(--lg-top) + 26px)),
+    linear-gradient(to top, rgba(0, 0, 0, 0.05), #000 calc(var(--lg-bottom, 0px) - 10px));
+  mask-composite: intersect;
 }
 
 .chat-messages::-webkit-scrollbar {
@@ -1990,9 +2076,10 @@
 }
 
 .chat-bubble--user {
-  background: #2a2e31;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  color: rgba(255, 255, 255, 0.92);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.065));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 4px 14px rgba(0, 0, 0, 0.18);
+  color: rgba(255, 255, 255, 0.94);
   border-bottom-right-radius: 6px;
 }
 
@@ -2105,28 +2192,34 @@
   border-color: rgba(138, 180, 248, 0.25);
 }
 
-/* Chat Input Area */
+/* Chat Input Area: a dock floating over the bottom of the transcript. Only the
+   composer takes the pointer; the gutters around it scroll the transcript. */
 .chat-input-area {
-  padding: 12px 14px 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  background: #202225;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  padding: 0 12px 12px;
+  pointer-events: none;
 }
 
+.chat-input-area > * {
+  pointer-events: auto;
+}
+
+/* Glass composer (LiquidGlass paints its surface; see liquid-glass.css). */
 .prompt-form {
   display: flex;
   flex-direction: column;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 16px;
-  background: #2a2e31;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  border-radius: 20px;
   overflow: visible;
-  position: relative;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.prompt-form:focus-within {
-  border-color: rgba(138, 180, 248, 0.38);
-  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.32), 0 0 0 3px rgba(138, 180, 248, 0.08);
+.prompt-form:focus-within,
+.agent-goal-form:focus-within {
+  --lg-focus: 1;
+  box-shadow: 0 0 0 1px rgba(138, 180, 248, 0.42), 0 0 0 4px rgba(138, 180, 248, 0.1);
 }
 
 /* Page Context Pill & Badge */
@@ -2290,16 +2383,16 @@
   border: 0;
   border-radius: 50%;
   background: transparent;
-  color: rgba(255, 255, 255, 0.35);
+  color: rgba(255, 255, 255, 0.45);
   cursor: pointer;
-  transition: all 0.15s ease;
 }
 
 .prompt-form-actions .prompt-icon-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.78);
 }
 
+/* A drop of the chrome's accent blue, lit from above like the glass around it. */
 .prompt-submit {
   width: 32px;
   height: 32px;
@@ -2307,20 +2400,21 @@
   place-items: center;
   border: 0;
   border-radius: 50%;
-  background: #8ab4f8;
+  background: linear-gradient(180deg, #a4c8ff, #8ab4f8 55%, #7aa5ec);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), inset 0 -1px 2px rgba(13, 27, 42, 0.25), 0 3px 10px rgba(138, 180, 248, 0.28);
   color: #0d1b2a;
   cursor: pointer;
-  transition: all 0.15s ease;
 }
 
-.prompt-submit:hover {
-  background: #a4c8ff;
-  transform: scale(1.05);
+.prompt-submit:hover:not(:disabled) {
+  filter: brightness(1.07);
+  transform: scale(1.06);
 }
 
 .prompt-submit:disabled {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.24);
   cursor: not-allowed;
   transform: none;
 }
@@ -2346,10 +2440,11 @@
   bottom: calc(100% + 8px);
   left: 0;
   width: 260px;
-  background: #25282c;
+  background: rgba(37, 38, 42, 0.74);
+  backdrop-filter: blur(24px) saturate(170%);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  border-radius: 14px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   padding: 6px;
   z-index: 1000;
   animation: attachPopoverIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
@@ -3051,16 +3146,35 @@
 }
 
 /* ────────────────────────────────────────────────────
-   Analysis Details Drawer & Reports — shadcn/ui Redesign
-   Modern, fluid, calm zinc dark-mode aesthetics for normal users
+   Analysis Details Drawer & Reports — Liquid Glass
+   The report sheets are glass, like the assistant panel. The sheet is a pane
+   of frosted glass (.analysis-drawer__glass) over the page: while a report is
+   open the shell shows a frozen frame of the page in place of the hidden
+   guest view (.webview-freeze), so there is a real page to see through. Its
+   controls and cards are LiquidGlass surfaces floating on the pane (see
+   ReportDrawer.tsx). --page-luminance, set by the shell from that frame,
+   thickens the pane's smoke over bright pages so its white text stays legible.
    ──────────────────────────────────────────────────── */
 
+/* The page, frozen in place of the guest view while a report drawer hides it. */
+.webview-freeze {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* A light dim, so the page stays visible through the glass. */
 .analysis-drawer-overlay {
   position: fixed;
   inset: 0;
   z-index: 100;
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(5px);
+  background: rgba(6, 6, 8, 0.32);
+  backdrop-filter: blur(2px) saturate(115%);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.24s cubic-bezier(0.16, 1, 0.3, 1);
@@ -3079,33 +3193,66 @@
   width: 540px;
   max-width: 100vw;
   z-index: 101;
-  background: #09090b; /* shadcn zinc-950 */
-  border-left: 1px solid rgba(255, 255, 255, 0.08); /* border-zinc-800 */
-  box-shadow: -16px 0 48px rgba(0, 0, 0, 0.7);
-  transform: translateX(100%);
-  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  isolation: isolate;
+  background: transparent;
+  box-shadow: -18px 0 50px rgba(0, 0, 0, 0.42);
+  /* Past its own shadow, so none of it peeks in while closed. */
+  transform: translateX(calc(100% + 60px));
+  transition: transform 0.42s cubic-bezier(0.16, 1, 0.3, 1);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   color: #fafafa;
   font-family: var(--font-assistant, system-ui, -apple-system, sans-serif);
+  letter-spacing: -0.006em;
 }
 
 .analysis-drawer--open {
   transform: translateX(0);
 }
 
-/* ── Drawer Header (shadcn SheetHeader) ── */
+/* The pane: frosted glass with a smoky veil and a lit leading edge. */
+.analysis-drawer__glass {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  backdrop-filter: blur(32px) saturate(175%);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), transparent 26%),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05), transparent 18%),
+    rgba(18, 18, 22, calc(0.4 + 0.36 * var(--page-luminance, 0.3)));
+  box-shadow:
+    inset 1px 0 0 rgba(255, 255, 255, 0.2),
+    inset 2px 0 10px -6px rgba(255, 255, 255, 0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .analysis-drawer {
+    transition-duration: 0.01ms;
+  }
+}
+
+/* ── Drawer Header ── */
 .drawer-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
+  padding: 16px 18px 14px 20px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   flex-shrink: 0;
-  background: rgba(9, 9, 11, 0.95);
-  backdrop-filter: blur(12px);
+  background: transparent;
   gap: 12px;
+}
+
+/* Glass capsule holding the close button, like the assistant's header controls. */
+.drawer-header-actions {
+  display: flex;
+  align-items: center;
+  height: 34px;
+  padding: 2px;
+  border-radius: 999px;
+  flex-shrink: 0;
 }
 
 .drawer-header-left {
@@ -3137,40 +3284,43 @@
   border-radius: 9999px;
   font-size: 10.5px;
   font-weight: 500;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  color: #a1a1aa;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.72);
   letter-spacing: 0.02em;
 }
 
 .drawer-subtitle {
   margin: 0;
-  color: #71717a;
+  color: rgba(255, 255, 255, 0.55);
   font-size: 11.5px;
   font-weight: 400;
   line-height: 1.4;
 }
 
 .drawer-close-btn {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
+  border: 0;
+  border-radius: 999px;
   background: transparent;
-  color: #71717a;
+  color: rgba(255, 255, 255, 0.72);
   cursor: pointer;
-  transition: all 0.15s ease;
   flex-shrink: 0;
   padding: 0;
 }
 
 .drawer-close-btn:hover {
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(255, 255, 255, 0.14);
-  color: #fafafa;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.drawer-close-btn:focus-visible {
+  outline: 2px solid rgba(138, 180, 248, 0.7);
+  outline-offset: 2px;
 }
 
 /* ── Drawer Scrollable Content ── */
@@ -3202,27 +3352,23 @@
   background: rgba(255, 255, 255, 0.24);
 }
 
-/* ── Hero Verdict Alert Banner (shadcn Alert) ── */
+/* ── Hero Verdict Banner: glass tinted by the verdict ── */
 .analysis-verdict {
   display: flex;
   align-items: flex-start;
   gap: 12px;
   padding: 14px 16px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: #111114;
+  border-radius: 18px;
   flex-shrink: 0;
-  transition: all 0.2s ease;
 }
 
-.analysis-verdict--safe {
-  background: rgba(16, 185, 129, 0.07);
-  border-color: rgba(16, 185, 129, 0.22);
+/* Doubled class: liquid-glass.css loads after this sheet and sets the default tint. */
+.analysis-verdict--safe.lg-host {
+  --lg-tint: rgba(16, 185, 129, 0.16);
 }
 
-.analysis-verdict--blocked {
-  background: rgba(239, 68, 68, 0.07);
-  border-color: rgba(239, 68, 68, 0.24);
+.analysis-verdict--blocked.lg-host {
+  --lg-tint: rgba(239, 68, 68, 0.18);
 }
 
 .analysis-verdict__icon-wrap {
@@ -3276,63 +3422,69 @@
 .analysis-verdict__desc {
   margin: 4px 0 0;
   font-size: 12px;
-  color: #a1a1aa;
+  color: rgba(255, 255, 255, 0.7);
   line-height: 1.5;
 }
 
-/* ── Segmented Control / Tabs (shadcn Tabs) ── */
-.analysis-tabs {
-  display: flex;
-  gap: 3px;
+/* ── Section Tabs: a glass capsule with a glass lens (GlassSwitch) ──
+   The lens shares the assistant's Chat/Agent lens styles. */
+.analysis-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  height: 38px;
   padding: 3px;
-  background: #141417;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 8px;
+  border-radius: 999px;
   flex-shrink: 0;
+  touch-action: none;
+  user-select: none;
 }
 
-.analysis-tab-btn {
-  flex: 1;
+.analysis-tab {
+  position: relative;
+  appearance: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 6px 12px;
-  font-size: 12px;
-  font-weight: 500;
-  color: #71717a;
+  min-width: 0;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
   background: transparent;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  user-select: none;
-}
-
-.analysis-tab-btn:hover {
-  color: #d4d4d8;
-}
-
-.analysis-tab-btn--active {
-  background: #27272a;
-  color: #fafafa;
+  color: rgba(255, 255, 255, 0.55);
+  font-family: inherit;
+  font-size: 12px;
   font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  transition: color 0.25s ease;
+}
+
+.analysis-tab:hover {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.analysis-tab--active {
+  color: rgba(255, 255, 255, 0.97);
+}
+
+.analysis-tab:focus-visible {
+  outline: 2px solid rgba(138, 180, 248, 0.7);
+  outline-offset: 2px;
 }
 
 .analysis-tab-count {
   display: inline-flex;
-  padding: 1px 5px;
+  padding: 1px 6px;
   font-size: 10px;
   font-weight: 600;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #a1a1aa;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
 }
 
-.analysis-tab-btn--active .analysis-tab-count {
-  background: rgba(255, 255, 255, 0.14);
-  color: #fafafa;
+.analysis-tab--active .analysis-tab-count {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
 }
 
 /* ── Quick Stat Cards Grid (shadcn Metric Cards) ── */
@@ -3344,24 +3496,18 @@
 }
 
 .analysis-stat-card {
-  background: #111114;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 9px;
-  padding: 11px 12px;
+  border-radius: 16px;
+  padding: 11px 13px;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  transition: border-color 0.15s ease;
-}
-
-.analysis-stat-card:hover {
-  border-color: rgba(255, 255, 255, 0.12);
+  min-width: 0;
 }
 
 .analysis-stat-card__label {
   font-size: 10.5px;
   font-weight: 500;
-  color: #71717a;
+  color: rgba(255, 255, 255, 0.55);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   white-space: nowrap;
@@ -3387,19 +3533,16 @@
 
 .analysis-stat-card__desc {
   font-size: 10.5px;
-  color: #52525b;
+  color: rgba(255, 255, 255, 0.42);
   margin-top: 1px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* ── Modern shadcn Card Container ── */
+/* ── Glass Card Container (LiquidGlass paints its surface) ── */
 .analysis-card {
-  background: #111114;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 10px;
-  overflow: hidden;
+  border-radius: 18px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -3409,9 +3552,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 11px 14px;
-  background: rgba(255, 255, 255, 0.02);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 12px 16px;
+  background: transparent;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   gap: 8px;
 }
 
@@ -3426,93 +3569,49 @@
 }
 
 .analysis-card__header-left svg {
-  color: #a1a1aa;
+  color: rgba(255, 255, 255, 0.6);
 }
 
 .analysis-card__body {
-  padding: 13px 14px;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-/* ── Plain-English Explanation Blocks ── */
-.analysis-summary-block {
+/* ── Plain-English Explanation: the model's summary as headed paragraphs ──
+   Deliberately uncoloured: it reads as a written summary, not as status UI. */
+.analysis-summary-section {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  flex-direction: column;
+  gap: 3px;
+  animation: fadeInBlock 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-.analysis-summary-block__icon {
-  margin-top: 1px;
-  flex-shrink: 0;
+.analysis-summary-section + .analysis-summary-section {
+  margin-top: 4px;
 }
 
-.analysis-summary-block__content {
-  flex: 1;
-  min-width: 0;
-}
-
-.analysis-summary-block__title {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 3px;
-}
-
-.analysis-summary-block__text {
+.analysis-summary-section__title {
   margin: 0;
-  font-size: 12px;
-  color: #d4d4d8;
-  line-height: 1.55;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #fafafa;
+  letter-spacing: -0.005em;
 }
 
-.analysis-summary-block--verdict {
-  background: rgba(16, 185, 129, 0.05);
-  border-color: rgba(16, 185, 129, 0.15);
-}
-.analysis-summary-block--verdict .analysis-summary-block__title {
-  color: #34d399;
-}
-.analysis-summary-block--verdict .analysis-summary-block__icon {
-  color: #34d399;
-}
-
-.analysis-summary-block--verdict-danger {
-  background: rgba(239, 68, 68, 0.05);
-  border-color: rgba(239, 68, 68, 0.15);
-}
-.analysis-summary-block--verdict-danger .analysis-summary-block__title {
-  color: #f87171;
-}
-.analysis-summary-block--verdict-danger .analysis-summary-block__icon {
-  color: #f87171;
-}
-
-.analysis-summary-block--findings .analysis-summary-block__title {
-  color: #93c5fd;
-}
-.analysis-summary-block--findings .analysis-summary-block__icon {
-  color: #93c5fd;
-}
-
-.analysis-summary-block--action .analysis-summary-block__title {
-  color: #fde047;
-}
-.analysis-summary-block--action .analysis-summary-block__icon {
-  color: #fde047;
+.analysis-summary-section__text {
+  margin: 0;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.78);
+  line-height: 1.6;
 }
 
 /* ── Typewriter Streaming Animation ── */
 .analysis-typing-cursor {
   display: inline-block;
   margin-left: 2px;
-  color: #34d399;
+  color: rgba(255, 255, 255, 0.8);
   font-weight: 700;
   animation: typingBlink 0.75s infinite;
   user-select: none;
@@ -3522,10 +3621,6 @@
 @keyframes typingBlink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
-}
-
-.analysis-summary-block--typing {
-  animation: fadeInBlock 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 @keyframes fadeInBlock {
@@ -3544,15 +3639,13 @@
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: #111114;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 9px 14px;
+  border-radius: 999px;
   flex-shrink: 0;
 }
 
 .webpage-page-meta__icon {
-  color: #71717a;
+  color: rgba(255, 255, 255, 0.6);
   flex-shrink: 0;
 }
 
@@ -3578,7 +3671,7 @@
 .webpage-page-meta__url {
   font-size: 11px;
   font-family: var(--font-assistant-mono, monospace);
-  color: #71717a;
+  color: rgba(255, 255, 255, 0.5);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3591,22 +3684,19 @@
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  padding: 12px 14px;
+  border-radius: 16px;
   flex-shrink: 0;
 }
 
-.analysis-notice--warning {
-  background: rgba(245, 158, 11, 0.06);
-  border-color: rgba(245, 158, 11, 0.18);
+/* Doubled class: liquid-glass.css loads after this sheet and sets the default tint. */
+.analysis-notice--warning.lg-host {
+  --lg-tint: rgba(245, 158, 11, 0.12);
   color: #fde047;
 }
 
-.analysis-notice--danger {
-  background: rgba(239, 68, 68, 0.07);
-  border-color: rgba(239, 68, 68, 0.22);
+.analysis-notice--danger.lg-host {
+  --lg-tint: rgba(239, 68, 68, 0.15);
   color: #fca5a5;
 }
 
@@ -3633,7 +3723,7 @@
 .analysis-notice__content p {
   margin: 0;
   font-size: 11px;
-  color: #a1a1aa;
+  color: rgba(255, 255, 255, 0.66);
   line-height: 1.45;
 }
 
@@ -3648,23 +3738,22 @@
   text-align: left;
   font-size: 10.5px;
   font-weight: 500;
-  color: #71717a;
+  color: rgba(255, 255, 255, 0.5);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  padding: 8px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.02);
+  padding: 9px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .analysis-table td {
-  padding: 9px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  color: #d4d4d8;
+  padding: 9px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.85);
   vertical-align: middle;
 }
 
 .analysis-table tbody tr:hover td {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .analysis-table tbody tr:last-child td {
@@ -3709,11 +3798,13 @@
 }
 
 /* ── Chunk Evidence Cards ── */
+/* Panes inside a glass card: a lighter layer of the same glass. */
 .analysis-chunk-card {
   padding: 10px 12px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -3735,10 +3826,10 @@
   font-family: var(--font-assistant-mono, monospace);
   font-size: 11px;
   padding: 7px 10px;
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  color: #a1a1aa;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.7);
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-all;
@@ -4074,7 +4165,6 @@
 
 /* Fade out other elements explicitly */
 .startup-screen--transitioning .welcome-title,
-.startup-screen--transitioning .start-button,
 .startup-screen--transitioning .startup-header,
 .startup-screen--transitioning .startup-guide {
   opacity: 0 !important;
@@ -4084,8 +4174,19 @@
   will-change: transform, opacity;
 }
 
-.startup-screen--transitioning .start-button {
+.startup-screen--transitioning .start-button-anchor {
   transform: translate3d(-50%, 50%, 0) scale(0.8);
+  pointer-events: none;
+  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* The slider fades layer by layer: opacity on the button would cut its glass
+   off from the orb mid-fade (see .start-button). */
+.startup-screen--transitioning .start-button :is(.lg-warp, .lg-tint, .lg-sheen, .lg-rim),
+.startup-screen--transitioning .start-button__label,
+.startup-screen--transitioning .start-button__arrow {
+  opacity: 0 !important;
+  transition: opacity 0.6s ease;
 }
 
 /* Planet orb during transition: stays at scale(1) without zooming into the planet, then smoothly fades */
@@ -4226,7 +4327,7 @@
 
 .webpage-scan-progress__phase {
   margin: -6px 0 0;
-  color: #a1a1aa;
+  color: rgba(255, 255, 255, 0.66);
   font-size: 12.5px;
   max-width: 360px;
   line-height: 1.5;
@@ -4235,10 +4336,8 @@
 .webpage-scan-progress__card {
   width: 100%;
   max-width: 380px;
-  background: #111114;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 10px;
-  padding: 16px;
+  border-radius: 20px;
+  padding: 18px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -4321,7 +4420,7 @@
 .webpage-scan-progress__scope {
   max-width: 360px;
   margin: 0;
-  color: #52525b;
+  color: rgba(255, 255, 255, 0.42);
   font-size: 11px;
   line-height: 1.5;
 }
@@ -4336,17 +4435,18 @@
    distinct so it is always obvious whether the AI is answering a question or
    operating the browser. */
 
+/* Glass capsule with two equal tabs, so the lens travels exactly one tab. */
 .assistant-mode-switch {
-  display: flex;
-  gap: 2px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  height: 34px;
   padding: 3px;
   border-radius: 999px;
-  background: #2a2e31;
-  border: 1px solid rgba(255, 255, 255, 0.06);
   flex-shrink: 0;
 }
 
 .assistant-mode-tab {
+  position: relative;
   appearance: none;
   border: 0;
   background: transparent;
@@ -4355,10 +4455,10 @@
   font-size: 11.5px;
   font-weight: 600;
   letter-spacing: 0;
-  padding: 5px 14px;
+  padding: 0 15px;
   border-radius: 999px;
   cursor: pointer;
-  transition: background 0.18s ease, color 0.18s ease;
+  transition: color 0.25s ease;
 }
 
 .assistant-mode-tab:hover {
@@ -4366,9 +4466,49 @@
 }
 
 .assistant-mode-tab--active {
-  background: #3a3f43;
-  color: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.97);
+}
+
+/* The lens: a brighter drop of glass under the selected tab. GlassSwitch
+   drives its transform on springs (slide, speed stretch, lift). Lifted, the
+   drop clears: less fill, a brighter rim and a deeper shadow, as if raised
+   off the capsule. Shared by the report drawers' section tabs. */
+.assistant-mode-lens,
+.analysis-lens {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc(50% - 3px);
+  pointer-events: none;
+  will-change: transform;
+}
+
+.assistant-mode-lens > span,
+.analysis-lens > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.1));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    inset 0 -1px 1px rgba(0, 0, 0, 0.12),
+    0 2px 8px rgba(0, 0, 0, 0.28);
+  transition: background 0.25s ease, box-shadow 0.25s ease;
+}
+
+.assistant-mode-lens--lifted > span,
+.analysis-lens--lifted > span {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.34),
+    inset 0 1px 1px rgba(255, 255, 255, 0.4),
+    0 6px 18px rgba(0, 0, 0, 0.38);
+}
+
+.assistant-mode-switch {
+  touch-action: none;
+  user-select: none;
 }
 
 .assistant-mode-tab:focus-visible {
@@ -4392,7 +4532,7 @@
   align-items: center;
   justify-content: center;
   gap: 10px;
-  padding: 28px 26px;
+  padding: calc(var(--lg-top) + 16px) 26px calc(var(--lg-bottom, 0px) + 16px);
   text-align: center;
 }
 
@@ -4422,7 +4562,8 @@
 .agent-timeline {
   flex: 1;
   overflow-y: auto;
-  padding: 14px 16px;
+  padding: calc(var(--lg-top) + 6px) 16px calc(var(--lg-bottom, 0px) + 16px);
+  scroll-padding: var(--lg-top) 0 calc(var(--lg-bottom, 0px) + 16px);
   display: flex;
   flex-direction: column;
   gap: 7px;
@@ -4755,11 +4896,13 @@
 
 /* Approval sits directly above the composer so the decision is unmissable. */
 .agent-approval {
-  margin: 0 16px 10px;
+  margin: 8px 12px 0;
   padding: 12px;
-  border-radius: 11px;
-  background: rgba(255, 200, 120, 0.09);
+  border-radius: 16px;
+  background: rgba(58, 48, 34, 0.72);
+  backdrop-filter: blur(20px) saturate(165%);
   border: 1px solid rgba(255, 200, 120, 0.34);
+  box-shadow: inset 0 1px 0 rgba(255, 230, 190, 0.1), 0 8px 24px rgba(0, 0, 0, 0.28);
 }
 
 .agent-approval strong {
@@ -4815,24 +4958,32 @@
 .agent-approve:hover,
 .agent-decline:hover { filter: brightness(1.18); }
 
+/* Floats over the bottom of the timeline, like the chat composer's dock. Only
+   its cards take the pointer; the gutters scroll the timeline beneath. */
+.agent-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+}
+
+.agent-dock > * {
+  pointer-events: auto;
+}
+
 /* One composer card: textarea on top, hint and action on a footer row — the
-   same shape as the chat composer, so the two modes feel like one product. */
+   same glass shape as the chat composer, so the two modes feel like one
+   product (focus ring shared with .prompt-form). */
 .agent-goal-form {
   display: flex;
   flex-direction: column;
-  margin: 12px 14px 14px;
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  background: rgba(255, 255, 255, 0.035);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  margin: 10px 12px 12px;
+  border-radius: 20px;
   overflow: visible;
-  position: relative;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
-}
-
-.agent-goal-form:focus-within {
-  border-color: rgba(138, 180, 248, 0.38);
-  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.32), 0 0 0 3px rgba(138, 180, 248, 0.08);
 }
 
 .agent-goal-input {
@@ -4881,15 +5032,15 @@
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: filter 0.16s ease, opacity 0.16s ease;
   box-sizing: border-box;
   margin-left: auto;
 }
 
 .agent-run-button {
   border: 1px solid rgba(140, 175, 255, 0.42);
-  background: rgba(120, 160, 255, 0.22);
-  color: #dce7ff;
+  background: linear-gradient(180deg, rgba(138, 180, 248, 0.34), rgba(120, 160, 255, 0.2));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 3px 10px rgba(138, 180, 248, 0.14);
+  color: #e3ecff;
 }
 
 .agent-run-button:disabled { opacity: 0.38; cursor: not-allowed; }
@@ -4912,6 +5063,7 @@
 /* Kept mounted (see AiAssistantSidebar) so a running task survives a tab
    switch; `hidden` collapses it without unmounting. */
 .assistant-pane {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -5040,10 +5192,11 @@
   width: 275px;
   max-width: 320px;
   max-height: min(460px, 80vh);
-  background: #181b1e !important;
+  background: rgba(30, 31, 35, 0.8) !important;
+  backdrop-filter: blur(26px) saturate(170%);
   border: 1px solid rgba(255, 255, 255, 0.14) !important;
-  border-radius: 10px !important;
-  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.85), 0 0 1px rgba(255, 255, 255, 0.2) !important;
+  border-radius: 14px !important;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
   z-index: 10000;
   display: flex !important;
   flex-direction: column !important;
@@ -5346,9 +5499,9 @@
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border-radius: 8px;
-  background: rgba(16, 185, 129, 0.08);
-  border: 1px solid rgba(16, 185, 129, 0.2);
+  border-radius: 12px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.22);
   margin-bottom: 12px;
 }
 
@@ -5358,45 +5511,92 @@
 }
 
 /* ────────────────────────────────────────────────────
-   AI Model Gateway Dialog (OpenCode Reference Theme)
+   AI Providers Dialog — Liquid Glass
+   Glass like the assistant panel and the report drawers. The dialog is a pane
+   of frosted glass (.oc-modal__glass) over the page: while it is open the
+   shell shows a frozen frame of the page in place of the hidden guest view, so
+   there is a real page to see through. Its controls and cards are LiquidGlass
+   surfaces floating on the pane (see ProviderSettingsModal.tsx), and
+   --page-luminance thickens the pane's smoke over bright pages.
+   Nothing that holds glass may take opacity, filter or a backdrop-filter of
+   its own (the dialog, the frame, a card, a disabled button): any of them
+   would cut the glass inside off from the page. The glass hosts' rules double
+   the class, since liquid-glass.css loads after this sheet.
    ──────────────────────────────────────────────────── */
 
-.oc-modal-overlay {
+.oc-modal {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.75);
-  backdrop-filter: blur(12px);
+  z-index: 10000;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 10000;
   padding: 20px;
-  animation: ocFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
 }
 
+/* A light dim, so the page stays visible through the glass. */
+.oc-modal-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(6, 6, 8, 0.32);
+  backdrop-filter: blur(2px) saturate(115%);
+  animation: ocFadeIn 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Springs in on transform alone, overshooting like a drop settling: a fade
+   would cut its glass off from the page until the fade ended. */
 .oc-modal-container {
   position: relative;
+  isolation: isolate;
   width: 100%;
   max-width: 720px;
   max-height: 88vh;
-  background: #141414;
-  border: 1px solid #262626;
-  border-radius: 12px;
-  box-shadow: 0 28px 72px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  background: transparent;
+  border-radius: 22px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5), 0 6px 18px rgba(0, 0, 0, 0.28);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: ocScaleUp 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
+  color: #fafafa;
+  animation: ocGlassIn 0.5s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+}
+
+/* The pane: frosted glass with a smoky veil and lit edges. */
+.oc-modal__glass {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  backdrop-filter: blur(32px) saturate(175%);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 24%),
+    rgba(18, 18, 22, calc(0.44 + 0.34 * var(--page-luminance, 0.3)));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    inset 0 -1px 1px rgba(0, 0, 0, 0.2);
+  animation: ocFadeIn 0.24s ease both;
 }
 
 .oc-header-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 22px 28px 14px;
-  background: #141414;
-  border-bottom: 1px solid #1f1f1f;
+  padding: 18px 20px 14px 28px;
+  background: transparent;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+/* Glass capsule holding the close button, like the report drawers' header. */
+.oc-header-actions {
+  display: flex;
+  align-items: center;
+  height: 34px;
+  padding: 2px;
+  border-radius: 999px;
   flex-shrink: 0;
 }
 
@@ -5408,18 +5608,20 @@
   letter-spacing: -0.02em;
 }
 
-.oc-btn-back {
+.oc-btn-back.lg-host {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: transparent;
-  border: none;
-  color: #999999;
+  height: 32px;
+  border: 0;
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.72);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  padding: 4px 0;
-  transition: color 0.12s ease;
+  padding: 0 14px 0 11px;
+  margin-left: -8px;
+  transition: color 0.15s ease, box-shadow 0.2s ease;
 }
 
 .oc-btn-back:hover {
@@ -5427,31 +5629,61 @@
 }
 
 .oc-close-btn {
+  width: 30px;
+  height: 30px;
   background: transparent;
-  border: none;
-  color: #666666;
+  border: 0;
+  color: rgba(255, 255, 255, 0.72);
   cursor: pointer;
-  padding: 6px;
-  border-radius: 6px;
+  padding: 0;
+  border-radius: 999px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.12s ease;
 }
 
 .oc-close-btn:hover {
   color: #ffffff;
-  background: #222222;
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .oc-body-content {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 20px 28px 28px;
-  background: #141414;
+  background: transparent;
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+
+.oc-body-content::-webkit-scrollbar {
+  width: 5px;
+}
+
+.oc-body-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.oc-body-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+}
+
+.oc-body-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.oc-btn-back:focus-visible,
+.oc-close-btn:focus-visible,
+.oc-btn-connect:focus-visible,
+.oc-btn-disconnect:focus-visible,
+.oc-btn-secondary:focus-visible,
+.oc-btn-cancel:focus-visible,
+.oc-btn-submit:focus-visible {
+  outline: 2px solid rgba(138, 180, 248, 0.7);
+  outline-offset: 2px;
 }
 
 .oc-providers-view {
@@ -5474,12 +5706,12 @@
   letter-spacing: -0.01em;
 }
 
-/* Card Groups (Screenshot 1 & 4) */
-.oc-card-group {
-  background: #191919;
-  border: 1px solid #262626;
-  border-radius: 8px;
-  overflow: hidden;
+/* A frosted glass card floating on the pane, like the reports' cards. Not
+   overflow: hidden, which would clip the buttons' spring physics; the rows
+   round their own corners instead. */
+.oc-card-group.lg-host {
+  border-radius: 16px;
+  --lg-tint: rgba(255, 255, 255, 0.035);
 }
 
 .oc-provider-row {
@@ -5487,17 +5719,26 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 18px;
-  border-bottom: 1px solid #222222;
-  transition: background 0.12s ease;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  transition: background 0.15s ease;
   gap: 12px;
+}
+
+.oc-provider-row:first-of-type {
+  border-radius: 16px 16px 0 0;
 }
 
 .oc-provider-row:last-child {
   border-bottom: none;
+  border-radius: 0 0 16px 16px;
+}
+
+.oc-provider-row:only-of-type {
+  border-radius: 16px;
 }
 
 .oc-provider-row:hover {
-  background: #1d1d1d;
+  background: rgba(255, 255, 255, 0.045);
 }
 
 .oc-provider-info {
@@ -5541,22 +5782,22 @@
 .oc-badge {
   font-size: 10.5px;
   font-weight: 500;
-  padding: 1.5px 6px;
-  border-radius: 4px;
-  background: #252525;
-  color: #999999;
-  border: 1px solid #2e2e2e;
+  padding: 1.5px 7px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .oc-badge--active {
-  background: rgba(37, 99, 235, 0.18);
-  color: #60a5fa;
-  border: 1px solid rgba(37, 99, 235, 0.35);
+  background: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+  border: 1px solid rgba(96, 165, 250, 0.38);
 }
 
 .oc-provider-desc {
   font-size: 12px;
-  color: #888888;
+  color: rgba(255, 255, 255, 0.55);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5569,42 +5810,57 @@
   flex-shrink: 0;
 }
 
-.oc-btn-connect {
-  display: flex;
+/* Glass pills (see LiquidGlass): the glass paints the fill and the rim, and
+   its springs own the transform, so these set no background or border and
+   never transition transform. Each state is a tint of the glass. */
+.oc-btn-connect.lg-host,
+.oc-btn-disconnect.lg-host,
+.oc-btn-secondary.lg-host,
+.oc-btn-cancel.lg-host,
+.oc-btn-submit.lg-host {
+  display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 6px 14px;
-  border-radius: 6px;
-  background: #242424;
-  border: 1px solid #333333;
-  color: #e5e5e5;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: color 0.15s ease, box-shadow 0.2s ease;
 }
 
-.oc-btn-connect:hover {
-  background: #2c2c2c;
-  border-color: #444444;
+.oc-btn-connect .lg-tint,
+.oc-btn-disconnect .lg-tint,
+.oc-btn-secondary .lg-tint,
+.oc-btn-cancel .lg-tint,
+.oc-btn-submit .lg-tint {
+  transition: background 0.15s ease;
+}
+
+.oc-btn-connect.lg-host,
+.oc-btn-secondary.lg-host {
+  --lg-tint: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.oc-btn-connect.lg-host:hover,
+.oc-btn-secondary.lg-host:hover:not(:disabled) {
+  --lg-tint: rgba(255, 255, 255, 0.15);
   color: #ffffff;
 }
 
-.oc-btn-disconnect {
-  background: transparent;
-  border: none;
-  color: #888888;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  padding: 6px 10px;
-  border-radius: 6px;
-  transition: all 0.12s ease;
+.oc-btn-disconnect.lg-host {
+  --lg-tint: rgba(255, 255, 255, 0.02);
+  color: rgba(255, 255, 255, 0.55);
+  padding: 0 12px;
 }
 
-.oc-btn-disconnect:hover {
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.1);
+.oc-btn-disconnect.lg-host:hover {
+  --lg-tint: rgba(239, 68, 68, 0.16);
+  color: #f87171;
 }
 
 /* Connect View Form */
@@ -5619,7 +5875,7 @@
   gap: 14px;
   margin-bottom: 20px;
   padding-bottom: 16px;
-  border-bottom: 1px solid #222222;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .oc-connect-title {
@@ -5631,7 +5887,7 @@
 
 .oc-connect-desc {
   font-size: 12px;
-  color: #888888;
+  color: rgba(255, 255, 255, 0.55);
   margin: 0;
 }
 
@@ -5641,14 +5897,13 @@
   gap: 15px;
 }
 
-.oc-custom-fields {
+.oc-custom-fields.lg-host {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 12px;
-  background: #111111;
-  border: 1px solid #222222;
-  border-radius: 6px;
+  padding: 14px;
+  border-radius: 16px;
+  --lg-tint: rgba(255, 255, 255, 0.035);
 }
 
 .oc-form-row {
@@ -5672,13 +5927,13 @@
 .oc-label {
   font-size: 12px;
   font-weight: 500;
-  color: #bbbbbb;
+  color: rgba(255, 255, 255, 0.72);
 }
 
 .oc-link-btn {
   background: transparent;
   border: none;
-  color: #888888;
+  color: rgba(255, 255, 255, 0.55);
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
@@ -5688,16 +5943,22 @@
   color: #ffffff;
 }
 
+/* Fields are wells in the glass: a darker, translucent inset. */
 .oc-input {
   width: 100%;
   padding: 8px 12px;
-  background: #191919;
-  border: 1px solid #262626;
-  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
   color: #ffffff;
   font-size: 12.5px;
   outline: none;
-  transition: border-color 0.12s ease;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.oc-input::placeholder {
+  color: rgba(255, 255, 255, 0.35);
 }
 
 .oc-input--mono {
@@ -5705,20 +5966,31 @@
   font-size: 12px;
 }
 
-.oc-input:focus {
-  border-color: #3b82f6;
+.oc-input:focus,
+.oc-select:focus {
+  border-color: rgba(96, 165, 250, 0.7);
+  background: rgba(0, 0, 0, 0.3);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25), 0 0 0 3px rgba(59, 130, 246, 0.18);
 }
 
 .oc-select {
   width: 100%;
   padding: 8px 12px;
-  background: #191919;
-  border: 1px solid #262626;
-  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
   color: #ffffff;
   font-size: 12.5px;
   outline: none;
   color-scheme: dark;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* The native list opens outside the glass, so it gets a solid colour. */
+.oc-select option {
+  background: #1c1c21;
+  color: #ffffff;
 }
 
 .oc-checkbox-group {
@@ -5731,7 +6003,7 @@
   align-items: center;
   gap: 7px;
   font-size: 11.5px;
-  color: #888888;
+  color: rgba(255, 255, 255, 0.6);
   cursor: pointer;
 }
 
@@ -5746,49 +6018,34 @@
   gap: 10px;
 }
 
-.oc-btn-secondary {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 14px;
-  border-radius: 6px;
-  background: #1f1f1f;
-  border: 1px solid #2d2d2d;
-  color: #d1d5db;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.12s ease;
-}
-
-.oc-btn-secondary:hover:not(:disabled) {
-  background: #282828;
-  color: #ffffff;
-  border-color: #3d3d3d;
-}
-
-.oc-btn-secondary:disabled {
-  opacity: 0.45;
+/* A disabled pill dims its contents, not itself (see the section note). */
+.oc-btn-secondary:disabled,
+.oc-btn-submit:disabled {
   cursor: not-allowed;
+}
+
+.oc-btn-secondary:disabled > :not(.lg-layers),
+.oc-btn-submit:disabled > :not(.lg-layers) {
+  opacity: 0.45;
 }
 
 .oc-alert {
   padding: 9px 12px;
-  border-radius: 6px;
+  border-radius: 12px;
   font-size: 12px;
   font-weight: 500;
 }
 
 .oc-alert--error {
-  background: rgba(239, 68, 68, 0.12);
-  border: 1px solid rgba(239, 68, 68, 0.28);
-  color: #f87171;
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
 }
 
 .oc-alert--success {
-  background: rgba(16, 185, 129, 0.12);
-  border: 1px solid rgba(16, 185, 129, 0.28);
-  color: #34d399;
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #6ee7b7;
 }
 
 .oc-form-footer {
@@ -5798,45 +6055,31 @@
   gap: 10px;
   margin-top: 6px;
   padding-top: 14px;
-  border-top: 1px solid #222222;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.oc-btn-cancel {
-  padding: 7px 16px;
-  border-radius: 6px;
-  background: transparent;
-  border: 1px solid #2c2c2c;
-  color: #a0a0a0;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.12s ease;
+.oc-btn-cancel.lg-host {
+  padding: 0 16px;
+  --lg-tint: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.68);
 }
 
-.oc-btn-cancel:hover {
-  background: #1f1f1f;
+.oc-btn-cancel.lg-host:hover {
+  --lg-tint: rgba(255, 255, 255, 0.1);
   color: #ffffff;
 }
 
-.oc-btn-submit {
-  padding: 7px 18px;
-  border-radius: 6px;
-  background: #ffffff;
-  border: 1px solid #ffffff;
-  color: #000000;
-  font-size: 12px;
+/* The primary action: the brightest glass in the dialog, still see-through. */
+.oc-btn-submit.lg-host {
+  padding: 0 18px;
+  --lg-tint: rgba(255, 255, 255, 0.24);
+  color: #ffffff;
   font-weight: 600;
-  cursor: pointer;
-  transition: all 0.12s ease;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
 }
 
-.oc-btn-submit:hover:not(:disabled) {
-  background: #ededed;
-}
-
-.oc-btn-submit:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
+.oc-btn-submit.lg-host:hover:not(:disabled) {
+  --lg-tint: rgba(255, 255, 255, 0.32);
 }
 
 /* Spinner Animation */
@@ -5853,22 +6096,26 @@
 @keyframes ocFadeIn {
   from {
     opacity: 0;
-    backdrop-filter: blur(0px);
   }
   to {
     opacity: 1;
-    backdrop-filter: blur(12px);
   }
 }
 
-@keyframes ocScaleUp {
+@keyframes ocGlassIn {
   from {
-    opacity: 0;
-    transform: scale(0.95) translateY(12px);
+    transform: scale(0.94) translateY(14px);
   }
   to {
-    opacity: 1;
     transform: scale(1) translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-modal-overlay,
+  .oc-modal-container,
+  .oc-modal__glass {
+    animation: none;
   }
 }
 

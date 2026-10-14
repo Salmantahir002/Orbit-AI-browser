@@ -5,6 +5,8 @@ import type { ApprovalRequest } from '../services/agentApprovalPolicy'
 import type { AgentTaskResult } from '../types/agentTypes'
 import { PromptModelPicker } from './PromptModelPicker'
 import { AgentResultMessage } from './AgentResultMessage'
+import { LiquidGlass } from './LiquidGlass'
+import { trackDockHeight } from '../utils/floatingDock'
 import { describeAgentActivity } from '../services/agentActivity'
 import './AgentActivity.css'
 
@@ -233,81 +235,85 @@ export function AgentModePanel({ targetId, currentUrl, onOpenTab, onOpenSettings
         </div>
       )}
 
-      {/* Outside the scrolling history: activity must remain visible during long tasks. */}
-      {isRunning || planSummary ? (
-        <div className={`agent-activity${isRunning && !approval && status !== 'Stopping…' ? ' agent-activity--active' : ''}`}>
-          <button
-            type="button"
-            className="agent-activity-toggle"
-            aria-expanded={showPlan}
-            aria-controls={planDetailsId}
-            onClick={() => setShowPlan(previous => !previous)}
-          >
-            <span className="agent-activity-orbit" aria-hidden="true"><span /><span /><span /></span>
-            <span className="agent-activity-copy">
-              <span className="agent-activity-label">{!isRunning ? 'Planning summary' : approval ? 'Waiting for approval' : status === 'Stopping…' ? 'Stopping' : isPlanning ? 'Thinking' : 'Working'}</span>
-              <span className="agent-activity-status" role="status" aria-live="polite">
-                {isRunning ? (approval ? approval.summary : status) : 'View the latest action plan'}
+      {/* Outside the scrolling history: activity must remain visible during long
+          tasks. The dock floats; the timeline scrolls on beneath its glass. */}
+      <div className="agent-dock" ref={trackDockHeight}>
+        {isRunning || planSummary ? (
+          <div className={`agent-activity${isRunning && !approval && status !== 'Stopping…' ? ' agent-activity--active' : ''}`}>
+            <button
+              type="button"
+              className="agent-activity-toggle"
+              aria-expanded={showPlan}
+              aria-controls={planDetailsId}
+              onClick={() => setShowPlan(previous => !previous)}
+            >
+              <span className="agent-activity-orbit" aria-hidden="true"><span /><span /><span /></span>
+              <span className="agent-activity-copy">
+                <span className="agent-activity-label">{!isRunning ? 'Planning summary' : approval ? 'Waiting for approval' : status === 'Stopping…' ? 'Stopping' : isPlanning ? 'Thinking' : 'Working'}</span>
+                <span className="agent-activity-status" role="status" aria-live="polite">
+                  {isRunning ? (approval ? approval.summary : status) : 'View the latest action plan'}
+                </span>
               </span>
-            </span>
-            <svg className="agent-activity-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-              <path d="m9 5 7 7-7 7" />
-            </svg>
-          </button>
-          <div id={planDetailsId} className="agent-activity-detail" hidden={!showPlan}>
-            <span className="agent-activity-caption">{isPlanning ? 'Latest plan · updating' : 'Action summary'}</span>
-            <p>{planSummary || 'Reviewing the current page. The next-action summary will appear here when the plan is ready.'}</p>
-          </div>
-        </div>
-      ) : null}
-
-
-      {approval ? (
-        <div className="agent-approval" role="alertdialog" aria-label="Approval required">
-          <strong>Approve this action?</strong>
-          <p className="agent-approval-summary">{approval.summary}</p>
-          <p className="agent-approval-reason">{approval.reason}</p>
-          <div className="agent-approval-actions">
-            <button type="button" className="agent-approve" onClick={() => answerApproval(true)}>
-              Allow
+              <svg className="agent-activity-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <path d="m9 5 7 7-7 7" />
+              </svg>
             </button>
-            <button type="button" className="agent-decline" onClick={() => answerApproval(false)}>
-              Don't allow
-            </button>
+            <div id={planDetailsId} className="agent-activity-detail" hidden={!showPlan}>
+              <span className="agent-activity-caption">{isPlanning ? 'Latest plan · updating' : 'Action summary'}</span>
+              <p>{planSummary || 'Reviewing the current page. The next-action summary will appear here when the plan is ready.'}</p>
+            </div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      {/* The goal box and its button share one framed composer so the button
-          can never drift out of alignment as the textarea grows. */}
-      <form className="agent-goal-form" onSubmit={handleSubmit}>
-        <textarea
-          className="agent-goal-input"
-          aria-label="Agent goal"
-          placeholder="What should the agent do on this page?"
-          rows={2}
-          value={goal}
-          disabled={isRunning}
-          onChange={(event) => setGoal(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault()
-              event.currentTarget.form?.requestSubmit()
-            }
-          }}
-        />
-        <div className="agent-goal-footer">
-          <div className="agent-goal-footer-left">
-            <PromptModelPicker onOpenSettings={onOpenSettings} />
-            <span className="agent-goal-hint">{isRunning ? 'Running…' : 'Enter to run'}</span>
+
+        {approval ? (
+          <div className="agent-approval" role="alertdialog" aria-label="Approval required">
+            <strong>Approve this action?</strong>
+            <p className="agent-approval-summary">{approval.summary}</p>
+            <p className="agent-approval-reason">{approval.reason}</p>
+            <div className="agent-approval-actions">
+              <button type="button" className="agent-approve" onClick={() => answerApproval(true)}>
+                Allow
+              </button>
+              <button type="button" className="agent-decline" onClick={() => answerApproval(false)}>
+                Don't allow
+              </button>
+            </div>
           </div>
-          {isRunning ? (
-            <button type="button" className="agent-stop-button" onClick={handleStop}>Stop</button>
-          ) : (
-            <button type="submit" className="agent-run-button" disabled={!goal.trim()}>Run</button>
-          )}
-        </div>
-      </form>
+        ) : null}
+
+        {/* The goal box and its button share one framed composer so the button
+            can never drift out of alignment as the textarea grows. */}
+        <form className="agent-goal-form lg-host" onSubmit={handleSubmit}>
+          <LiquidGlass refraction={96} bezel={22} blur={6} elasticity={0.14} />
+          <textarea
+            className="agent-goal-input"
+            aria-label="Agent goal"
+            placeholder="What should the agent do on this page?"
+            rows={2}
+            value={goal}
+            disabled={isRunning}
+            onChange={(event) => setGoal(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault()
+                event.currentTarget.form?.requestSubmit()
+              }
+            }}
+          />
+          <div className="agent-goal-footer">
+            <div className="agent-goal-footer-left">
+              <PromptModelPicker onOpenSettings={onOpenSettings} />
+              <span className="agent-goal-hint">{isRunning ? 'Running…' : 'Enter to run'}</span>
+            </div>
+            {isRunning ? (
+              <button type="button" className="agent-stop-button lg-press" onClick={handleStop}>Stop</button>
+            ) : (
+              <button type="submit" className="agent-run-button lg-press" disabled={!goal.trim()}>Run</button>
+            )}
+          </div>
+        </form>
+      </div>
 
       {showResultPopup && result ? (
         <div

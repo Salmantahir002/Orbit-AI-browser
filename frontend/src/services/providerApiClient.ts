@@ -23,13 +23,16 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => '')
+    let detail: string | undefined
     try {
-      const errorJson = JSON.parse(errorText)
-      throw new Error(errorJson.detail || errorText || `Request failed with status ${response.status}`)
-    } catch (e: any) {
-      if (e.message && e.message !== errorText) throw e
-      throw new Error(errorText || `Request failed with status ${response.status}`)
+      const errorJson: unknown = JSON.parse(errorText)
+      if (errorJson && typeof errorJson === 'object' && 'detail' in errorJson && typeof errorJson.detail === 'string') {
+        detail = errorJson.detail
+      }
+    } catch {
+      // Not JSON: the body itself is the message.
     }
+    throw new Error(detail || errorText || `Request failed with status ${response.status}`)
   }
 
   return response.json() as Promise<T>
@@ -94,7 +97,7 @@ export async function setBackendActiveProvider(config: ClientProviderConfig): Pr
  * Get all stored provider configurations from Electron secure storage (or localStorage fallback).
  */
 export async function getAllStoredProviders(): Promise<ClientProviderConfig[]> {
-  const electron = (window as any).electronAPI
+  const electron = window.electronAPI
   if (electron?.providers?.getAll) {
     try {
       return await electron.providers.getAll()
@@ -116,7 +119,7 @@ export async function getAllStoredProviders(): Promise<ClientProviderConfig[]> {
  * Save provider configuration securely in Electron OS keychain (or localStorage fallback).
  */
 export async function saveStoredProvider(config: ClientProviderConfig & { set_active?: boolean }): Promise<ClientProviderConfig> {
-  const electron = (window as any).electronAPI
+  const electron = window.electronAPI
   if (electron?.providers?.save) {
     const saved = await electron.providers.save(config)
     return saved
@@ -157,7 +160,7 @@ export async function saveStoredProvider(config: ClientProviderConfig & { set_ac
  * Delete a stored provider configuration.
  */
 export async function deleteStoredProvider(providerId: string): Promise<boolean> {
-  const electron = (window as any).electronAPI
+  const electron = window.electronAPI
   if (electron?.providers?.delete) {
     const res = await electron.providers.delete(providerId)
     return res.ok
@@ -173,7 +176,7 @@ export async function deleteStoredProvider(providerId: string): Promise<boolean>
  * Set the active provider in storage and backend.
  */
 export async function setActiveStoredProvider(id: string | null, selectedModel?: string): Promise<boolean> {
-  const electron = (window as any).electronAPI
+  const electron = window.electronAPI
   if (electron?.providers?.setActive) {
     const res = await electron.providers.setActive({ id, selected_model: selectedModel })
     return res.ok

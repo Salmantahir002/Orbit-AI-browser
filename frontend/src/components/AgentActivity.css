@@ -1,9 +1,12 @@
+/* Floats in the agent dock over the timeline, so it is frosted glass. */
 .agent-mode .agent-activity {
   flex: 0 0 auto;
-  margin: 8px 14px 0;
-  border: 1px solid rgba(172, 195, 209, .16);
-  border-radius: 12px;
-  background: rgba(172, 195, 209, .04);
+  margin: 8px 12px 0;
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 16px;
+  background: rgba(40, 41, 45, .66);
+  backdrop-filter: blur(20px) saturate(165%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 8px 24px rgba(0, 0, 0, .28);
   overflow: hidden;
 }
 

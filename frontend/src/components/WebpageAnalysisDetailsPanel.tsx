@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { ChunkResult } from '../types/analysisDetailsTypes'
 import type { SecurityCheckResponse, WebpageContent } from '../types/securityTypes'
+import { GlassSwitch } from './GlassSwitch'
+import { LiquidGlass } from './LiquidGlass'
+import { ReportDrawer } from './ReportDrawer'
 import { ScanSummarySection } from './ScanSummarySection'
 
 type Props = {
@@ -30,15 +33,6 @@ function ShieldAlertIcon() {
       <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
       <path d="M12 8v4" />
       <path d="M12 16h.01" />
-    </svg>
-  )
-}
-
-function CloseIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M18 6 6 18" />
-      <path d="m6 6 12 12" />
     </svg>
   )
 }
@@ -134,7 +128,8 @@ function ScanProgress({ content }: { content: WebpageContent }) {
         <p className="webpage-scan-progress__phase">{phase}</p>
       </div>
 
-      <div className="webpage-scan-progress__card">
+      <div className="webpage-scan-progress__card lg-host">
+        <LiquidGlass refraction={0} blur={8} elasticity={0.1} />
         {/* Progress Bar (shadcn Progress) */}
         <div
           className="webpage-scan-progress__track"
@@ -228,40 +223,17 @@ export function WebpageAnalysisDetailsPanel({ content, isOpen, isScanning, resul
   // 1. Scanning In Progress
   if (isScanning) {
     return (
-      <>
-        <div
-          className={`analysis-drawer-overlay ${isOpen ? 'analysis-drawer-overlay--open' : ''}`}
-          onClick={onClose}
-          aria-hidden="true"
-        />
-        <aside
-          className={`analysis-drawer ${isOpen ? 'analysis-drawer--open' : ''}`}
-          aria-label="Webpage scan in progress"
-          aria-modal="true"
-          role="dialog"
-        >
-          <header className="drawer-header">
-            <div className="drawer-header-left">
-              <div className="drawer-header-title-row">
-                <h3>Webpage Security Scan</h3>
-                <span className="drawer-badge">Scanning…</span>
-              </div>
-              <p className="drawer-subtitle">Inspecting page content for indirect prompt injections</p>
-            </div>
-            <button
-              className="drawer-close-btn"
-              type="button"
-              onClick={onClose}
-              aria-label="Close webpage scan report"
-            >
-              <CloseIcon />
-            </button>
-          </header>
-          <div className="drawer-content">
-            <ScanProgress content={content} />
-          </div>
-        </aside>
-      </>
+      <ReportDrawer
+        isOpen={isOpen}
+        onClose={onClose}
+        label="Webpage scan in progress"
+        title="Webpage Security Scan"
+        badge="Scanning…"
+        subtitle="Inspecting page content for indirect prompt injections"
+        closeLabel="Close webpage scan report"
+      >
+        <ScanProgress content={content} />
+      </ReportDrawer>
     )
   }
 
@@ -278,222 +250,194 @@ export function WebpageAnalysisDetailsPanel({ content, isOpen, isScanning, resul
     .sort((a, b) => Number(b.flagged) - Number(a.flagged))
 
   return (
-    <>
-      <div
-        className={`analysis-drawer-overlay ${isOpen ? 'analysis-drawer-overlay--open' : ''}`}
-        onClick={onClose}
-        aria-hidden="true"
+    <ReportDrawer
+      isOpen={isOpen}
+      onClose={onClose}
+      label="Webpage Scan Report"
+      title="Webpage Security Report"
+      badge="Indirect Analysis"
+      subtitle="Verification of web content loaded into this tab"
+      closeLabel="Close webpage scan report"
+    >
+      {/* Page Target URL Info */}
+      <div className="webpage-page-meta lg-host">
+        <LiquidGlass refraction={0} blur={6} elasticity={0.1} />
+        <div className="webpage-page-meta__icon">
+          <GlobeIcon />
+        </div>
+        <div className="webpage-page-meta__info">
+          <span className="webpage-page-meta__title" title={content.page_title || 'Untitled page'}>
+            {content.page_title || 'Untitled page'}
+          </span>
+          <span className="webpage-page-meta__url" title={content.url}>
+            {content.url}
+          </span>
+        </div>
+      </div>
+
+      {/* 1. HERO VERDICT ALERT BANNER */}
+      <div className={`analysis-verdict lg-host ${isBlocked ? 'analysis-verdict--blocked' : 'analysis-verdict--safe'}`}>
+        <LiquidGlass refraction={0} blur={8} elasticity={0.08} />
+        <div className="analysis-verdict__icon-wrap">
+          {isBlocked ? <ShieldAlertIcon /> : <ShieldCheckIcon />}
+        </div>
+        <div className="analysis-verdict__body">
+          <div className="analysis-verdict__header-line">
+            <span className="analysis-verdict__title">
+              {isBlocked ? 'Security Threat Detected on Page' : 'Webpage Verified Clean'}
+            </span>
+            <span className={`analysis-badge ${isBlocked ? 'analysis-badge--danger' : 'analysis-badge--safe'}`}>
+              {isBlocked ? 'THREAT FOUND' : 'CLEAN'}
+            </span>
+          </div>
+          <p className="analysis-verdict__desc">
+            {result.summary_reason || (isBlocked
+              ? 'Suspicious instruction-like text was found in this webpage that could hijack AI assistance.'
+              : 'No prompt-injection directives or malicious instructions were detected in this page.')}
+          </p>
+        </div>
+      </div>
+
+      {/* 2. STATS OVERVIEW CARDS */}
+      <div className="analysis-stats-grid">
+        <div className="analysis-stat-card lg-host">
+          <LiquidGlass refraction={0} blur={6} elasticity={0.18} />
+          <span className="analysis-stat-card__label">Page Safety</span>
+          <span className={`analysis-stat-card__val ${isBlocked ? 'analysis-stat-card__val--danger' : 'analysis-stat-card__val--safe'}`}>
+            {isBlocked ? 'Threat' : 'Clean'}
+          </span>
+          <span className="analysis-stat-card__desc">Indirect injection test</span>
+        </div>
+
+        <div className="analysis-stat-card lg-host">
+          <LiquidGlass refraction={0} blur={6} elasticity={0.18} />
+          <span className="analysis-stat-card__label">Channels</span>
+          <span className="analysis-stat-card__val">
+            {channelRows.length} active
+          </span>
+          <span className="analysis-stat-card__desc">DOM & text sources</span>
+        </div>
+
+        <div className="analysis-stat-card lg-host">
+          <LiquidGlass refraction={0} blur={6} elasticity={0.18} />
+          <span className="analysis-stat-card__label">Engine</span>
+          <span className="analysis-stat-card__val" style={{ fontSize: 14 }}>
+            {details.classifier_mode === 'dl_model' ? 'DL + Rules' : 'Rule-Based'}
+          </span>
+          <span className="analysis-stat-card__desc">Dual-layer detector</span>
+        </div>
+      </div>
+
+      {/* 3. SEGMENTED NAVIGATION TABS */}
+      <GlassSwitch
+        classPrefix="analysis"
+        aberration={0}
+        ariaLabel="Report sections"
+        value={activeTab}
+        onChange={setActiveTab}
+        options={[
+          { id: 'overview', label: <><FileTextIcon /><span>Summary & Insights</span></> },
+          {
+            id: 'channels',
+            label: <><LayersIcon /><span>Scanned Channels</span><span className="analysis-tab-count">{channelRows.length}</span></>,
+          },
+        ]}
       />
-      <aside
-        className={`analysis-drawer ${isOpen ? 'analysis-drawer--open' : ''}`}
-        aria-label="Webpage Scan Report"
-        aria-modal="true"
-        role="dialog"
-      >
-        {/* Header */}
-        <header className="drawer-header">
-          <div className="drawer-header-left">
-            <div className="drawer-header-title-row">
-              <h3>Webpage Security Report</h3>
-              <span className="drawer-badge">Indirect Analysis</span>
-            </div>
-            <p className="drawer-subtitle">Verification of web content loaded into this tab</p>
+
+      {/* TAB 1: OVERVIEW & AI SUMMARY */}
+      <div style={{ display: activeTab === 'overview' ? 'flex' : 'none', flexDirection: 'column', gap: 16 }}>
+        {/* Plain-English AI Explanation */}
+        <ScanSummarySection source="webpage_content" details={details} page={content} />
+
+        {/* Credential Warning Advisory Notice (shadcn Alert) */}
+        <div className={`analysis-notice lg-host ${isBlocked ? 'analysis-notice--danger' : 'analysis-notice--warning'}`}>
+          <LiquidGlass refraction={0} blur={8} elasticity={0.05} />
+          <InfoIcon />
+          <div className="analysis-notice__content">
+            <strong>{isBlocked ? 'Do not interact with this page' : 'A passed scan is not credential clearance'}</strong>
+            <p>
+              {isBlocked
+                ? 'Do not enter passwords, payment details, or other sensitive information while this page is flagged.'
+                : 'This scan checks page content for indirect prompt injections. It does not verify that external websites, login portals, or payment requests are legitimate.'}
+            </p>
           </div>
-          <button
-            className="drawer-close-btn"
-            type="button"
-            onClick={onClose}
-            aria-label="Close webpage scan report"
-          >
-            <CloseIcon />
-          </button>
-        </header>
+        </div>
 
-        <div className="drawer-content">
-
-          {/* Page Target URL Info */}
-          <div className="webpage-page-meta">
-            <div className="webpage-page-meta__icon">
-              <GlobeIcon />
-            </div>
-            <div className="webpage-page-meta__info">
-              <span className="webpage-page-meta__title" title={content.page_title || 'Untitled page'}>
-                {content.page_title || 'Untitled page'}
-              </span>
-              <span className="webpage-page-meta__url" title={content.url}>
-                {content.url}
+        {/* Threat Signals / Flagged Patterns (if any) */}
+        {(result.matched_patterns.length > 0 || suspiciousChunks.length > 0) && (
+          <div className="analysis-card lg-host">
+            <LiquidGlass refraction={0} blur={8} elasticity={0.05} />
+            <div className="analysis-card__header">
+              <span style={{ fontSize: 11.5, fontWeight: 600, color: '#f87171', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Detected Threat Signals ({suspiciousChunks.length})
               </span>
             </div>
-          </div>
-
-          {/* 1. HERO VERDICT ALERT BANNER */}
-          <div className={`analysis-verdict ${isBlocked ? 'analysis-verdict--blocked' : 'analysis-verdict--safe'}`}>
-            <div className="analysis-verdict__icon-wrap">
-              {isBlocked ? <ShieldAlertIcon /> : <ShieldCheckIcon />}
-            </div>
-            <div className="analysis-verdict__body">
-              <div className="analysis-verdict__header-line">
-                <span className="analysis-verdict__title">
-                  {isBlocked ? 'Security Threat Detected on Page' : 'Webpage Verified Clean'}
-                </span>
-                <span className={`analysis-badge ${isBlocked ? 'analysis-badge--danger' : 'analysis-badge--safe'}`}>
-                  {isBlocked ? 'THREAT FOUND' : 'CLEAN'}
-                </span>
-              </div>
-              <p className="analysis-verdict__desc">
-                {result.summary_reason || (isBlocked
-                  ? 'Suspicious instruction-like text was found in this webpage that could hijack AI assistance.'
-                  : 'No prompt-injection directives or malicious instructions were detected in this page.')}
-              </p>
-            </div>
-          </div>
-
-          {/* 2. STATS OVERVIEW CARDS */}
-          <div className="analysis-stats-grid">
-            <div className="analysis-stat-card">
-              <span className="analysis-stat-card__label">Page Safety</span>
-              <span className={`analysis-stat-card__val ${isBlocked ? 'analysis-stat-card__val--danger' : 'analysis-stat-card__val--safe'}`}>
-                {isBlocked ? 'Threat' : 'Clean'}
-              </span>
-              <span className="analysis-stat-card__desc">Indirect injection test</span>
-            </div>
-
-            <div className="analysis-stat-card">
-              <span className="analysis-stat-card__label">Channels</span>
-              <span className="analysis-stat-card__val">
-                {channelRows.length} active
-              </span>
-              <span className="analysis-stat-card__desc">DOM & text sources</span>
-            </div>
-
-            <div className="analysis-stat-card">
-              <span className="analysis-stat-card__label">Engine</span>
-              <span className="analysis-stat-card__val" style={{ fontSize: 14 }}>
-                {details.classifier_mode === 'dl_model' ? 'DL + Rules' : 'Rule-Based'}
-              </span>
-              <span className="analysis-stat-card__desc">Dual-layer detector</span>
-            </div>
-          </div>
-
-          {/* 3. SEGMENTED NAVIGATION TABS */}
-          <div className="analysis-tabs" role="tablist">
-            <button
-              type="button"
-              className={`analysis-tab-btn ${activeTab === 'overview' ? 'analysis-tab-btn--active' : ''}`}
-              onClick={() => setActiveTab('overview')}
-              role="tab"
-              aria-selected={activeTab === 'overview'}
-            >
-              <FileTextIcon />
-              <span>Summary & Insights</span>
-            </button>
-            <button
-              type="button"
-              className={`analysis-tab-btn ${activeTab === 'channels' ? 'analysis-tab-btn--active' : ''}`}
-              onClick={() => setActiveTab('channels')}
-              role="tab"
-              aria-selected={activeTab === 'channels'}
-            >
-              <LayersIcon />
-              <span>Scanned Channels</span>
-              <span className="analysis-tab-count">{channelRows.length}</span>
-            </button>
-          </div>
-
-          {/* TAB 1: OVERVIEW & AI SUMMARY */}
-          <div style={{ display: activeTab === 'overview' ? 'flex' : 'none', flexDirection: 'column', gap: 16 }}>
-            {/* Plain-English AI Explanation */}
-            <ScanSummarySection source="webpage_content" details={details} page={content} />
-
-            {/* Credential Warning Advisory Notice (shadcn Alert) */}
-            <div className={`analysis-notice ${isBlocked ? 'analysis-notice--danger' : 'analysis-notice--warning'}`}>
-              <InfoIcon />
-              <div className="analysis-notice__content">
-                <strong>{isBlocked ? 'Do not interact with this page' : 'A passed scan is not credential clearance'}</strong>
-                <p>
-                  {isBlocked
-                    ? 'Do not enter passwords, payment details, or other sensitive information while this page is flagged.'
-                    : 'This scan checks page content for indirect prompt injections. It does not verify that external websites, login portals, or payment requests are legitimate.'}
-                </p>
-              </div>
-            </div>
-
-            {/* Threat Signals / Flagged Patterns (if any) */}
-            {(result.matched_patterns.length > 0 || suspiciousChunks.length > 0) && (
-              <div className="analysis-card">
-                <div className="analysis-card__header">
-                  <span style={{ fontSize: 11.5, fontWeight: 600, color: '#f87171', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    Detected Threat Signals ({suspiciousChunks.length})
-                  </span>
-                </div>
-                <div className="analysis-card__body">
-                  {result.matched_patterns.length > 0 && (
-                    <div className="feature-tags">
-                      {result.matched_patterns.map((pattern) => (
-                        <span className="feature-tag feature-tag--danger" key={pattern}>
-                          {pattern}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {suspiciousChunks.map((chunk) => (
-                    <SuspiciousChunk chunk={chunk} key={chunk.chunk_id} />
+            <div className="analysis-card__body">
+              {result.matched_patterns.length > 0 && (
+                <div className="feature-tags">
+                  {result.matched_patterns.map((pattern) => (
+                    <span className="feature-tag feature-tag--danger" key={pattern}>
+                      {pattern}
+                    </span>
                   ))}
                 </div>
-              </div>
-            )}
-          </div>
-
-          {/* TAB 2: SCANNED CHANNELS TABLE */}
-          <div style={{ display: activeTab === 'channels' ? 'flex' : 'none', flexDirection: 'column', gap: 16 }}>
-            <div className="analysis-card">
-              <div className="analysis-card__header">
-                <div className="analysis-card__header-left">
-                  <LayersIcon />
-                  <span>Content Channels Scanned</span>
-                </div>
-                <span className="analysis-badge analysis-badge--secondary">
-                  {details.chunking.chunk_count} chunks analyzed
-                </span>
-              </div>
-              <div className="analysis-card__body" style={{ padding: 0 }}>
-                {channelRows.length > 0 ? (
-                  <table className="analysis-table">
-                    <thead>
-                      <tr>
-                        <th>Channel</th>
-                        <th>Characters</th>
-                        <th style={{ textAlign: 'right' }}>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {channelRows.map((row) => (
-                        <tr key={row.key}>
-                          <td style={{ fontWeight: 500 }}>{row.label}</td>
-                          <td style={{ fontFamily: 'var(--font-assistant-mono, monospace)', color: '#a1a1aa' }}>
-                            {row.chars.toLocaleString()}
-                          </td>
-                          <td style={{ textAlign: 'right' }}>
-                            <span className={`analysis-badge ${row.flagged ? 'analysis-badge--danger' : 'analysis-badge--safe'}`}>
-                              {row.flagged ? 'Flagged' : 'Clean'}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  <p style={{ margin: 0, padding: '14px 16px', color: '#71717a', fontSize: 12 }}>
-                    No page content was available to scan.
-                  </p>
-                )}
-              </div>
+              )}
+              {suspiciousChunks.map((chunk) => (
+                <SuspiciousChunk chunk={chunk} key={chunk.chunk_id} />
+              ))}
             </div>
           </div>
+        )}
+      </div>
 
+      {/* TAB 2: SCANNED CHANNELS TABLE */}
+      <div style={{ display: activeTab === 'channels' ? 'flex' : 'none', flexDirection: 'column', gap: 16 }}>
+        <div className="analysis-card lg-host">
+          <LiquidGlass refraction={0} blur={8} elasticity={0.05} />
+          <div className="analysis-card__header">
+            <div className="analysis-card__header-left">
+              <LayersIcon />
+              <span>Content Channels Scanned</span>
+            </div>
+            <span className="analysis-badge analysis-badge--secondary">
+              {details.chunking.chunk_count} chunks analyzed
+            </span>
+          </div>
+          <div className="analysis-card__body" style={{ padding: 0 }}>
+            {channelRows.length > 0 ? (
+              <table className="analysis-table">
+                <thead>
+                  <tr>
+                    <th>Channel</th>
+                    <th>Characters</th>
+                    <th style={{ textAlign: 'right' }}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {channelRows.map((row) => (
+                    <tr key={row.key}>
+                      <td style={{ fontWeight: 500 }}>{row.label}</td>
+                      <td style={{ fontFamily: 'var(--font-assistant-mono, monospace)', color: '#a1a1aa' }}>
+                        {row.chars.toLocaleString()}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <span className={`analysis-badge ${row.flagged ? 'analysis-badge--danger' : 'analysis-badge--safe'}`}>
+                          {row.flagged ? 'Flagged' : 'Clean'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p style={{ margin: 0, padding: '14px 16px', color: '#71717a', fontSize: 12 }}>
+                No page content was available to scan.
+              </p>
+            )}
+          </div>
         </div>
-      </aside>
-    </>
+      </div>
+    </ReportDrawer>
   )
 }
 
