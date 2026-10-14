@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2800" height="1420" viewBox="0 0 2800 1420">
+<rect width="100%" height="100%" fill="white"/>
+<text x="1400" y="48" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="58" fill="#17313f">Activity Diagram: Manual Webpage Scan and Report</text>
+<rect x="0" y="160" width="650" height="1225" fill="#ffffff" stroke="#d2e0e7" stroke-width="2"/>
+<rect x="18" y="90" width="614" height="70" fill="#e5f2f8" stroke="#2c6687" stroke-width="3"/>
+<text x="325" y="125" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="47" fill="#17313f">User</text>
+<rect x="650" y="160" width="950" height="1225" fill="#f9fcfe" stroke="#d2e0e7" stroke-width="2"/>
+<rect x="668" y="90" width="914" height="70" fill="#e5f2f8" stroke="#2c6687" stroke-width="3"/>
+<text x="1125" y="125" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="47" fill="#17313f">Orbit Browser and Electron</text>
+<rect x="1600" y="160" width="1200" height="1225" fill="#ffffff" stroke="#d2e0e7" stroke-width="2"/>
+<rect x="1618" y="90" width="1164" height="70" fill="#e5f2f8" stroke="#2c6687" stroke-width="3"/>
+<text x="2200" y="125" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="47" fill="#17313f">Local Security Backend</text>
+<circle cx="325" cy="224" r="23" fill="#3c9b71" stroke="#3c9b71" stroke-width="4"/>
+<rect x="90" y="284" width="470" height="112" fill="#e5f2f8" stroke="#2c6687" stroke-width="4"/>
+<text x="325" y="315" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="47" fill="#17313f">Open page and</text>
+<text x="325" y="365" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="47" fill="#17313f">select Scan</text>
+<rect x="740" y="284" width="770" height="112" fill="#e5f2f8" stroke="#2c6687" stroke-width="4"/>
+<text x="1125" y="315" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="47" fill="#17313f">Capture page content</text>
+<text x="1125" y="365" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="47" fill="#17313f">through Electron/CDP</text>
+<rect x="1805" y="284" width="790" height="112" fill="#e5f2f8" stroke="#2c6687" stroke-width="4"/>
+<text x="2200" y="315" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="47" fill="#17313f">Validate captured</text>
+<text x="2200" y="365" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="47" fill="#17313f">content channels</text>
+<polygon points="2200,449 2420,535 2200,621 1980,535" fill="#fff2cb" stroke="#2c6687" stroke-width="4"/>
+<text x="2200" y="511" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="44" fill="#17313f">Usable</text>
+<text x="2200" y="559" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="44" fill="#17313f">content?</text>
+<rect x="780" y="485" width="690" height="100" fill="#e5f2f8" stroke="#2c6687" stroke-width="4"/>
+<text x="1125" y="535" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="44" fill="#17313f">End without a scan report</text>
+<circle cx="1125" cy="650" r="28" fill="white" stroke="#c14a40" stroke-width="4"/>
+<circle cx="1125" cy="650" r="15" fill="#c14a40" stroke="#c14a40" stroke-width="4"/>
+<rect x="1800" y="704" width="800" height="112" fill="#e5f2f8" stroke="#2c6687" stroke-width="4"/>
+<text x="2200" y="735" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="47" fill="#17313f">Preprocess, chunk and</text>
+<text x="2200" y="785" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="47" fill="#17313f">classify page content</text>
+<polygon points="2200,884 2420,970 2200,1056 1980,970" fill="#fff2cb" stroke="#2c6687" stroke-width="4"/>
+<text x="2200" y="946" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="44" fill="#17313f">Any chunk</text>
+<text x="2200" y="994" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="44" fill="#17313f">flagged?</text>
+<rect x="1640" y="1108" width="480" height="104" fill="#e5f2f8" stroke="#2c6687" stroke-width="4"/>
+<text x="1880" y="1135" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="43" fill="#17313f">Clean verdict</text>
+<text x="1880" y="1185" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="43" fill="#17313f">returned</text>
+<rect x="2280" y="1108" width="480" height="104" fill="#e5f2f8" stroke="#2c6687" stroke-width="4"/>
+<text x="2520" y="1135" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="43" fill="#17313f">Flagged verdict</text>
+<text x="2520" y="1185" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="43" fill="#17313f">and evidence</text>
+<rect x="775" y="1230" width="700" height="100" fill="#e5f2f8" stroke="#2c6687" stroke-width="4"/>
+<text x="1125" y="1280" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="47" fill="#17313f">Display scan report</text>
+<rect x="90" y="1230" width="470" height="100" fill="#e5f2f8" stroke="#2c6687" stroke-width="4"/>
+<text x="325" y="1280" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="47" fill="#17313f">Review result</text>
+<circle cx="325" cy="1380" r="28" fill="white" stroke="#c14a40" stroke-width="4"/>
+<circle cx="325" cy="1380" r="15" fill="#c14a40" stroke="#c14a40" stroke-width="4"/>
+<polyline points="325,247 325,284" fill="none" stroke="#2c6687" stroke-width="5"/>
+<polygon points="325,284 313,262 337,262" fill="#2c6687"/>
+<polyline points="560,340 740,340" fill="none" stroke="#2c6687" stroke-width="5"/>
+<polygon points="740,340 718,328 718,352" fill="#2c6687"/>
+<polyline points="1510,340 1805,340" fill="none" stroke="#2c6687" stroke-width="5"/>
+<polygon points="1805,340 1783,328 1783,352" fill="#2c6687"/>
+<polyline points="2200,396 2200,449" fill="none" stroke="#2c6687" stroke-width="5"/>
+<polygon points="2200,449 2188,427 2212,427" fill="#2c6687"/>
+<polyline points="1980,535 1470,535" fill="none" stroke="#2c6687" stroke-width="5"/>
+<polygon points="1470,535 1492,523 1492,547" fill="#2c6687"/>
+<text x="1710" y="495" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="39" fill="#2c6687">No</text>
+<polyline points="1125,585 1125,622" fill="none" stroke="#2c6687" stroke-width="5"/>
+<polygon points="1125,622 1113,600 1137,600" fill="#2c6687"/>
+<polyline points="2200,621 2200,704" fill="none" stroke="#2c6687" stroke-width="5"/>
+<polygon points="2200,704 2188,682 2212,682" fill="#2c6687"/>
+<text x="2270" y="656" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="39" fill="#2c6687">Yes</text>
+<polyline points="2200,816 2200,884" fill="none" stroke="#2c6687" stroke-width="5"/>
+<polygon points="2200,884 2188,862 2212,862" fill="#2c6687"/>
+<polyline points="2200,1056 2200,1090 1880,1090 1880,1108" fill="none" stroke="#2c6687" stroke-width="5"/>
+<polygon points="1880,1108 1868,1086 1892,1086" fill="#2c6687"/>
+<polyline points="2200,1090 2520,1090 2520,1108" fill="none" stroke="#2c6687" stroke-width="5"/>
+<polygon points="2520,1108 2508,1086 2532,1086" fill="#2c6687"/>
+<text x="1910" y="1070" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="39" fill="#2c6687">No</text>
+<text x="2490" y="1070" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-weight="700" font-size="39" fill="#2c6687">Yes</text>
+<polyline points="1880,1212 1880,1230 2200,1230" fill="none" stroke="#2c6687" stroke-width="5"/>
+<polyline points="2520,1212 2520,1230 2200,1230" fill="none" stroke="#2c6687" stroke-width="5"/>
+<circle cx="2200" cy="1230" r="7" fill="#2c6687" stroke="#2c6687" stroke-width="4"/>
+<polyline points="2200,1230 2200,1280 1475,1280" fill="none" stroke="#2c6687" stroke-width="5"/>
+<polygon points="1475,1280 1497,1268 1497,1292" fill="#2c6687"/>
+<polyline points="775,1280 560,1280" fill="none" stroke="#2c6687" stroke-width="5"/>
+<polygon points="560,1280 582,1268 582,1292" fill="#2c6687"/>
+<polyline points="325,1330 325,1352" fill="none" stroke="#2c6687" stroke-width="5"/>
+<polygon points="325,1352 313,1330 337,1330" fill="#2c6687"/>
+</svg>

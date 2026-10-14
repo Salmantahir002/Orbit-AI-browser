@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useState, type FormEvent, type MouseEvent } from 'react'
 import { normalizeUrl } from '../services/urlUtils'
 import { BrowserLogo } from './BrowserLogo'
 
@@ -18,6 +18,10 @@ type BrowserToolbarProps = {
   onStop?: () => void
   onScanPage: () => void
   onToggleBookmark?: () => void
+  onMenuOpen: (event: MouseEvent<HTMLButtonElement>) => void
+  menuOpen: boolean
+  activeDownloads: number
+  onDownloadsOpen: () => void
 }
 
 function BackIcon() {
@@ -115,6 +119,10 @@ export function BrowserToolbar({
   onStop,
   onScanPage,
   onToggleBookmark,
+  onMenuOpen,
+  menuOpen,
+  activeDownloads,
+  onDownloadsOpen,
 }: BrowserToolbarProps) {
   const [errorMessage, setErrorMessage] = useState('')
 
@@ -176,6 +184,12 @@ export function BrowserToolbar({
       </form>
 
       <div className="toolbar-actions-group">
+        {activeDownloads > 0 ? (
+          <button className="nav-btn toolbar-download-indicator" type="button" onClick={onDownloadsOpen} aria-label={`Downloads: ${activeDownloads} active`} title="Downloads">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 16v5h14v-5" /></svg>
+            <span>{activeDownloads}</span>
+          </button>
+        ) : null}
         <button
           className={`scan-button ${isScanning ? 'scan-button--scanning' : ''}`}
           type="button"
@@ -205,6 +219,9 @@ export function BrowserToolbar({
           type="button"
           aria-label="Customize and control browser"
           title="Customize and control browser"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={onMenuOpen}
         >
           <BraveMenuIcon />
         </button>

@@ -129,7 +129,7 @@ async function savePageAs(guestContents: WebContents, mainWindow: BrowserWindow)
  * A `WebContentsView` gets no native context menu on its own — this is the
  * one gateway that supplies it, wired per-guest when the tab is created.
  */
-export function attachWebviewContextMenu(guestContents: WebContents, mainWindow: BrowserWindow) {
+export function attachWebviewContextMenu(guestContents: WebContents, mainWindow: BrowserWindow, saveDownloadAs = (url: string) => guestContents.downloadURL(url)) {
   // Fires on every open, not just the first — a fresh navigation deserves a
   // fresh banner since "Page" in the table would otherwise go stale.
   guestContents.on('devtools-opened', () => logVersionBanner(guestContents))
@@ -141,13 +141,14 @@ export function attachWebviewContextMenu(guestContents: WebContents, mainWindow:
       template.push(
         { label: 'Open Link in New Window', click: () => openInNewWindow(params.linkURL) },
         { label: 'Copy Link Address', click: () => clipboard.writeText(params.linkURL) },
+        { label: 'Save Link As...', click: () => saveDownloadAs(params.linkURL) },
         { type: 'separator' },
       )
     }
 
     if (params.hasImageContents) {
       template.push(
-        { label: 'Save Image As...', click: () => guestContents.downloadURL(params.srcURL) },
+        { label: 'Save Image As...', click: () => saveDownloadAs(params.srcURL) },
         { label: 'Copy Image', click: () => guestContents.copyImageAt(params.x, params.y) },
         { label: 'Copy Image Address', click: () => clipboard.writeText(params.srcURL) },
         { type: 'separator' },

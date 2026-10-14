@@ -12,6 +12,8 @@ import type { AnalysisDetails } from '../types/analysisDetailsTypes'
 import type { BookmarkItem } from '../types/bookmarkTypes'
 import type { SecurityCheckResponse, WebpageContent } from '../types/securityTypes'
 import { extractDomainForFavicon, getFaviconCandidates, resolveNavigationUrl } from '../services/urlUtils'
+import type { BrowserPanel } from '../../electron/browserUITypes'
+import '../styles/browser-panels.css'
 
 // Everything the first shell frame does not show is its own chunk: the assistant (chat + agent
 // runtime), the provider settings modal, and the two report drawers. They are prefetched once the
@@ -190,8 +192,37 @@ export function BrowserShell() {
   const [isProviderSettingsOpen, setIsProviderSettingsOpen] = useState(false)
   const [activeTargetId, setActiveTargetId] = useState<number | null>(null)
   const [bookmarks, setBookmarks] = useState<BookmarkItem[]>(readStoredBookmarks)
+  const [showBookmarksBar, setShowBookmarksBar] = useState(true)
+  const [browserMenuOpen, setBrowserMenuOpen] = useState(false)
+  const [activeDownloads, setActiveDownloads] = useState(0)
+  const [browserActionError, setBrowserActionError] = useState('')
+
+  const runBrowserAction = useCallback((action: Promise<unknown> | undefined) => {
+    void action?.catch((error: unknown) => setBrowserActionError(error instanceof Error ? error.message : 'The browser action failed.'))
+  }, [])
+
+  const showBrowserPanel = useCallback((panel: BrowserPanel, anchor?: { x: number; y: number }) => {
+    const targetId = webviewHandlesRef.current.get(activeTabId)?.getWebContentsId() ?? null
+    runBrowserAction(window.electronAPI?.browserUI.show(panel, targetId, anchor))
+  }, [activeTabId, runBrowserAction])
 
   useEffect(() => {
+    const ui = window.electronAPI?.browserUI
+    if (!ui) return
+    const receive = (snapshot: Awaited<ReturnType<typeof ui.snapshot>>) => {
+      setBookmarks(snapshot.bookmarks)
+      setShowBookmarksBar(snapshot.settings.showBookmarksBar)
+      setActiveDownloads(snapshot.downloads.filter((entry) => entry.state === 'progressing').length)
+    }
+    const unsubscribe = ui.onSnapshot(receive)
+    const visibility = ui.onVisibility(setBrowserMenuOpen)
+    const restoreFocus = ui.onRestoreFocus(() => document.querySelector<HTMLButtonElement>('.brave-menu-btn')?.focus())
+    runBrowserAction(ui.importBookmarks(readStoredBookmarks()).then(() => ui.snapshot()).then(receive))
+    return () => { unsubscribe(); visibility(); restoreFocus() }
+  }, [runBrowserAction])
+
+  useEffect(() => {
+    if (window.electronAPI?.browserUI) return
     try {
       window.localStorage.setItem(BOOKMARKS_STORAGE_KEY, JSON.stringify(bookmarks))
     } catch (err) {
@@ -201,6 +232,7 @@ export function BrowserShell() {
 
   const handleAddBookmark = useCallback((title: string, url: string) => {
     const resolvedUrl = resolveNavigationUrl(url)
+    if (window.electronAPI?.browserUI) { runBrowserAction(window.electronAPI.browserUI.saveBookmark({ title, url: resolvedUrl })); return }
     setBookmarks((prev) => {
       if (prev.some((b) => b.url === resolvedUrl)) return prev
       return [
@@ -214,24 +246,32 @@ export function BrowserShell() {
         },
       ]
     })
-  }, [])
+  }, [runBrowserAction])
 
   const handleEditBookmark = useCallback((id: string, title: string, url: string) => {
     const resolvedUrl = resolveNavigationUrl(url)
+    if (window.electronAPI?.browserUI) { runBrowserAction(window.electronAPI.browserUI.saveBookmark({ id, title, url: resolvedUrl })); return }
     setBookmarks((prev) => prev.map((b) => (
       b.id === id ? { ...b, title, url: resolvedUrl, favicon: getFaviconUrl(resolvedUrl) || b.favicon } : b
     )))
-  }, [])
+  }, [runBrowserAction])
 
   const handleDeleteBookmark = useCallback((id: string) => {
+    if (window.electronAPI?.browserUI) { runBrowserAction(window.electronAPI.browserUI.deleteBookmark(id)); return }
     setBookmarks((prev) => prev.filter((b) => b.id !== id))
-  }, [])
+  }, [runBrowserAction])
 
   const handleToggleBookmarkCurrentPage = useCallback(() => {
     if (!currentUrl || currentUrl === DEFAULT_BROWSER_URL) return
     const activeTab = tabs.find((t) => t.id === activeTabId)
     const activeTitle = activeTab?.title || HOMEPAGE_TAB_TITLE
     const activeFavicon = activeTab?.favicon || getFaviconUrl(currentUrl) || undefined
+
+    if (window.electronAPI?.browserUI) {
+      const existing = bookmarks.find((bookmark) => bookmark.url === currentUrl)
+      runBrowserAction(existing ? window.electronAPI.browserUI.deleteBookmark(existing.id) : window.electronAPI.browserUI.saveBookmark({ title: activeTitle, url: currentUrl }))
+      return
+    }
 
     setBookmarks((prev) => {
       const existing = prev.find((b) => b.url === currentUrl)
@@ -249,7 +289,7 @@ export function BrowserShell() {
         },
       ]
     })
-  }, [activeTabId, currentUrl, tabs])
+  }, [activeTabId, bookmarks, currentUrl, runBrowserAction, tabs])
 
   const isCurrentUrlBookmarked = bookmarks.some(
     (b) => b.url === currentUrl && currentUrl !== DEFAULT_BROWSER_URL
@@ -428,6 +468,7 @@ export function BrowserShell() {
     const tabIndex = tabs.findIndex((tab) => tab.id === tabId)
 
     if (tabs.length === 1) {
+      if (window.electronAPI?.browserUI) { runBrowserAction(window.electronAPI.browserUI.closeWindow()); return }
       const replacementTab: BrowserTab = {
         id: `tab-${nextTabId.current++}`,
         title: HOMEPAGE_TAB_TITLE,
@@ -444,7 +485,20 @@ export function BrowserShell() {
     if (tabId === activeTabId) {
       handleSelectTab(remainingTabs[Math.max(0, tabIndex - 1)])
     }
-  }, [activeTabId, handleSelectTab, tabs])
+  }, [activeTabId, handleSelectTab, runBrowserAction, tabs])
+
+  useEffect(() => window.electronAPI?.browserUI.onCommand(({ command, url }) => {
+    if (command === 'new-tab') { if (url) handleOpenBookmarkInNewTab(url); else handleNewTab() }
+    else if (command === 'bookmark-page') handleToggleBookmarkCurrentPage()
+    else if (command === 'close-tab') handleCloseTab(activeTabId)
+    else if (command === 'focus-address') {
+      const input = document.querySelector<HTMLInputElement>('.address-input'); input?.focus(); input?.select()
+    } else if (command === 'provider-settings') setIsProviderSettingsOpen(true)
+    else if (command === 'next-tab' || command === 'previous-tab') {
+      const index = tabs.findIndex((tab) => tab.id === activeTabId)
+      handleSelectTab(tabs[(index + (command === 'next-tab' ? 1 : tabs.length - 1)) % tabs.length])
+    }
+  }), [activeTabId, handleCloseTab, handleNewTab, handleOpenBookmarkInNewTab, handleSelectTab, handleToggleBookmarkCurrentPage, tabs])
 
   useEffect(() => {
     const browser = window.electronAPI?.browser
@@ -637,8 +691,15 @@ export function BrowserShell() {
           onStop={handleStop}
           onScanPage={handleScanPage}
           onToggleBookmark={handleToggleBookmarkCurrentPage}
+          menuOpen={browserMenuOpen}
+          activeDownloads={activeDownloads}
+          onDownloadsOpen={() => showBrowserPanel('downloads')}
+          onMenuOpen={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect()
+            showBrowserPanel('menu', { x: rect.right, y: rect.bottom + 8 })
+          }}
         />
-        <BookmarkBar
+        {showBookmarksBar ? <BookmarkBar
           bookmarks={bookmarks}
           currentUrl={currentUrl}
           currentTitle={activeTab?.title || HOMEPAGE_TAB_TITLE}
@@ -647,7 +708,7 @@ export function BrowserShell() {
           onAddBookmark={handleAddBookmark}
           onEditBookmark={handleEditBookmark}
           onDeleteBookmark={handleDeleteBookmark}
-        />
+        /> : null}
         <LoadingProgressBar isLoading={isCurrentTabLoading} />
         <div
           className={`content-grid ${assistantOpen ? 'content-grid--assistant-open' : ''} ${isResizingAssistant ? 'content-grid--resizing' : ''}`}
@@ -692,6 +753,8 @@ export function BrowserShell() {
           </div>
         </div>
       </div>
+
+      {browserActionError ? <div className="browser-action-error" role="alert">{browserActionError}<button type="button" onClick={() => setBrowserActionError('')}>Dismiss</button></div> : null}
 
       {/* These are separate reports and retain their own result state. Each panel already
           renders nothing until it has something to show, so it is only mounted from then on. */}

@@ -308,7 +308,7 @@ function StartupScreen({
 const BrowserShell = createDeferredComponent(() => import('./components/BrowserShell').then((module) => module.BrowserShell))
 
 function App() {
-  const [transitionState, setTransitionState] = useState<'welcome' | 'animating' | 'blown'>('welcome')
+  const [transitionState, setTransitionState] = useState<'welcome' | 'animating' | 'blown'>(() => new URLSearchParams(window.location.search).get('start') === 'browser' ? 'blown' : 'welcome')
 
   useEffect(() => {
     const idleId = window.requestIdleCallback(() => { void BrowserShell.load() })

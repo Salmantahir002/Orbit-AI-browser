@@ -1,17 +1,17 @@
 # Orbit Browser Architecture
 
-This document describes the current working-tree implementation of the project **Prompt Injection Defense in an AI-Native Browser**, reviewed on **30 September 2026**. The desktop product is named **Orbit**, its frontend package is `orbit-browser`, and its assistant is **Kimo**. Older package, storage, and window names still contain PromptGuard or Prompt Defense. Its React interface provides browser tabs, a manual webpage scan, AI chat, provider settings, and autonomous Agent Mode. A local Node.js/Fastify service performs prompt-injection classification and connects to a user-selected AI provider.
+This document describes the current working-tree implementation of the project **Prompt Injection Defense in an AI-Native Browser**, reviewed on **10 October 2026**. The desktop product is named **Orbit**, its frontend package is `orbit-browser`, and its assistant is **Kimo**. Older package, storage, and window names still contain PromptGuard or Prompt Defense. Its React interface provides browser tabs, a native browser menu with history, downloads, bookmarks, and settings, a manual webpage scan with plain-language explanations, AI chat, provider settings, and autonomous Agent Mode. A local Node.js/Fastify service performs prompt-injection classification and connects to a user-selected AI provider.
 
 Descriptions below distinguish executable behavior from retained helpers and proposed protections. In particular, the project implements manual webpage detection and a direct-chat-prompt gate; it currently does **not** automatically classify the page state, tool observations, or user goal supplied to Agent Mode. A project objective of protecting autonomous browsing must not be presented as an already-enforced end-to-end property.
 
 ## Chapter 1 — System Boundaries
 
-Orbit runs three application-controlled parts, with external websites executing in separate Chromium guest renderers:
+Orbit runs three application-controlled parts, with external websites executing in separate Chromium guest renderers. Each Orbit window has its own shell renderer and tab views, plus one transparent overlay view for browser menus:
 
 | Part | Implementation | Main responsibility |
 | --- | --- | --- |
-| Electron main process | frontend/electron/main.ts | Owns the application window, guest tabs, IPC handlers, CDP sessions, file picker, provider settings, and packaged backend lifecycle. |
-| React renderer | frontend/src/App.tsx (welcome screen), frontend/src/components/BrowserShell.tsx (the browser itself, loaded as its own chunk) and frontend/src/components/ | Renders the browser controls, scan reports, chat, provider settings, and Agent Mode; keeps tab and UI state. |
+| Electron main process | frontend/electron/main.ts, browserUIController.ts | Owns the application windows, guest tabs, the browser-menu overlay view, the saved browser profile, downloads, IPC handlers, CDP sessions, the agent input shield, file picker, provider settings, and packaged backend lifecycle. |
+| React renderer | frontend/src/App.tsx (welcome screen), frontend/src/components/BrowserShell.tsx (the browser itself, loaded as its own chunk) and frontend/src/components/ | Renders the browser controls, scan reports, chat, provider settings, and Agent Mode; keeps tab and UI state. The same bundle also renders the browser-menu overlay when loaded with `?surface=browser-overlay`. |
 | Local backend | backend-node/src/server.ts and backend-node/src/app.ts | Serves the /api/v1 HTTP API on 127.0.0.1:8000 by default; classifies text, builds agent plans, and calls AI providers. |
 
 The renderer calls Electron main through the API exposed by frontend/electron/preload.ts. The renderer and Electron main also call the local backend over HTTP. Browsed websites live in separate, main-owned WebContentsView instances; their page objects are not part of the React DOM.
@@ -21,8 +21,10 @@ The principal flows cross those boundaries as follows:
 | Flow | Path through the implementation |
 | --- | --- |
 | Manual page scan | Toolbar in React → BrowserWebView handle → preload scanWebview → Electron CdpInspectionService → backend /security/check-webpage → webpage analysis drawer. |
+| Scan explanation | Analysis drawer → backend /security/explain-scan → active provider (or built-in local summary) → summary section in the drawer. |
+| Browser menu | Toolbar menu button → preload browserUI → BrowserUIController → transparent overlay view (React, Radix) → profile store (history, bookmarks, downloads, settings). |
 | Chat | AI sidebar → backend /security/check-prompt → backend /llm/chat → active provider gateway → chat message in the sidebar. |
-| Agent action | AgentTask in React → backend /agent/plan → frontend tool/approval handling → preload runtimeInvoke → Electron BrowserRuntime → guest tab through CDP. |
+| Agent action | AgentTask in React → backend /agent/plan → frontend tool/approval handling → preload runtimeInvoke → Electron BrowserRuntime → guest tab through CDP, while an input shield covers the driven tab. |
 
 ```mermaid
 flowchart LR
@@ -31,6 +33,9 @@ flowchart LR
   MAIN --> CDP[Shared CDP session per guest]
   CDP --> PAGE
   UI -->|manual capture then check-webpage| API[Local Fastify API]
+  UI -->|explain-scan| API
+  MAIN --> OVERLAY[Menu overlay view and browser profile]
+  MAIN --> SHIELD[Agent input shield over driven tab]
   UI -->|check-prompt then llm/chat| API
   LOOP[AgentTask and working memory] -->|agent/plan| API
   UI --> LOOP
@@ -40,28 +45,31 @@ flowchart LR
   API -->|chat or planning| LLM[Selected AI provider]
 ```
 
-The local classifier and the selected generative model have different roles. Prompt Guard 2 detects injection; the selected provider answers chat questions and plans agent actions. Calling the planner does not invoke the classifier.
+The local classifier and the selected generative model have different roles. Prompt Guard 2 detects injection; the selected provider answers chat questions and plans agent actions. Calling the planner does not invoke the classifier. Scan explanations use the selected provider only to describe a finished scan; they never change its verdict.
 
 ## Chapter 2 — Repository and Entry Points
 
 | Path | Implemented role |
 | --- | --- |
-| frontend/electron/main.ts | Electron startup, guest-tab lifecycle, IPC, shared CDP sessions, provider synchronization. |
+| frontend/electron/main.ts | Electron startup, multi-window and guest-tab ownership, popup handling, IPC, shared CDP sessions, provider synchronization. |
+| frontend/electron/browserUIController.ts, browserProfileStore.ts, browserUITypes.ts | Browser menu overlay view, keyboard shortcuts, zoom, downloads, window commands, and the persisted history/bookmarks/settings profile. |
+| frontend/electron/agentInputShield.ts | Transparent view that blocks the user's own input on a tab while the agent drives it. |
 | frontend/electron/preload.ts | Exposes window.electronAPI to the renderer. |
-| frontend/electron/browserRuntime/ | Typed runtime contract, CDP session registry, semantic state builder, element resolver, input dispatch, waits, verification, advanced guest-page tools, and visual overlay. |
+| frontend/electron/browserRuntime/ | Typed runtime contract, CDP session registry, semantic state builder, element resolver, input dispatch, waits, verification, field probe, advanced guest-page tools, and visual overlay. |
 | frontend/electron/cdpInspectionService.ts | Captures page content channels for the manual scanner and the runtime's security-snapshot command. |
 | frontend/src/App.tsx | Welcome screen; loads and mounts the browser shell when the user starts. |
-| frontend/src/components/BrowserShell.tsx | Browser shell, tabs, navigation, bookmarks, assistant state, and manual scan orchestration. The assistant, provider settings modal, and report drawers are separate chunks, mounted on first use (see frontend/src/utils/deferredComponent.ts). |
-| frontend/src/components/ | Browser UI, AI sidebar, scan results, agent controls, and provider settings. |
+| frontend/src/components/BrowserShell.tsx | Browser shell, tabs, navigation, bookmark bar, assistant state, and manual scan orchestration. The assistant, provider settings modal, and report drawers are separate chunks, mounted on first use (see frontend/src/utils/deferredComponent.ts). |
+| frontend/src/components/ | Browser UI, AI sidebar, scan results and summaries, agent controls, provider settings, and BrowserOverlay (menu, history, downloads, bookmarks, settings panels). |
 | frontend/src/services/ | HTTP clients, page-content adapter, agent loop, tool mapping, approval policy, task working memory, temporary session memory, and retained browser-memory/recovery helpers. |
 | frontend/src/utils/ | Deferred component loading, model-capability heuristics, and browser-side DOCX extraction. |
 | backend-node/src/app.ts | Builds Fastify, configures CORS and errors, waits for classifier initialization, and registers routes. |
 | backend-node/src/routes/ | Health, security, chat, agent planning, and provider endpoints. |
-| backend-node/src/services/ | Text preparation, detectors, explanations, planner, tool validation, provider manager, and gateways. |
+| backend-node/src/services/ | Text preparation, detectors, feature explanations, scan summaries, planner, tool validation, provider manager, and gateways. |
 | backend-node/src/dl/ | Local Prompt Guard 2 loading and ONNX inference. |
 | backend-node/dl_models/prompt_injection_model/ | Model configuration, tokenizer, provenance in SOURCE.md, and locally provisioned onnx/model.onnx weights. Weights are Git-ignored. |
 | frontend/scripts/ | Development launcher, production backend staging, and standalone regression checks. |
 | backend-node/test/ and frontend/e2e/ | Backend Vitest and desktop Playwright tests. |
+| docs/ | Feature notes; browser-menu-implementation.md records the menu, profile, and download design and its validation. |
 
 The active backend is TypeScript/Fastify. The frontend is TypeScript/React/Electron. The current frontend scripts build and start backend-node; no Python service is part of this runtime.
 
@@ -73,17 +81,19 @@ In packaged or end-to-end runs, frontend/electron/backendProcess.ts starts the c
 
 backend-node/src/server.ts binds Fastify to 127.0.0.1. The three frontend HTTP clients, provider synchronization, and health polling target 127.0.0.1:8000/api/v1, so changing `PORT` or `API_V1_PREFIX` alone does not update their targets. `env.ts` loads dotenv from the process working directory; model paths are also resolved relative to that directory. The child spawn currently does not set an explicit working directory or model path.
 
-The preload bridge exposes tab creation/navigation/history/reload/stop, tab information, events and bounds, popup lifecycle events, manual page capture, typed browser-runtime invocation, and provider-setting operations. It exposes neither a generic IPC invocation function nor an app-version operation. Electron main checks that browser-tab, manual-scan, and runtime requests come from the app window. The runtime also requires a registered target before it can act on a tab. Provider IPC handlers currently do not perform the same sender check.
+The preload bridge exposes tab creation/navigation/history/reload/stop, tab information, events and bounds, active-tab and agent-lock operations, popup lifecycle events, manual page capture, typed browser-runtime invocation, provider-setting operations, and a `browserUI` object for the menu, profile, downloads, zoom, and window commands. It exposes no generic IPC invocation function. Electron main resolves the sending window with `requireShell`, which accepts only the main frame of a registered shell renderer, and `requireTabView` additionally requires that the tab belongs to that window. The runtime also requires a registered target before it can act on a tab. The `browser-ui:*` handlers apply a similar frame check through the controller. Provider IPC handlers currently do not perform the same sender check.
+
+Setting `ORBIT_USER_DATA_DIR` moves Electron's user-data directory away from the default prompt-defense-browser folder; the browser-menu tests use it for isolation.
 
 ## Chapter 4 — Browser Shell and Tabs
 
-BrowserShell.tsx owns the visible tab list, selected tab, address bar state, bookmarks, scan state, assistant state, and active runtime target ID. BrowserWebView.tsx normally creates a guest tab through browser:create-tab when mounted and closes it when unmounted. For a site-created popup, it instead adopts the existing webContents ID supplied by main. The component keeps that ID as its handle; Electron main keeps the matching WebContentsView.
+BrowserShell.tsx owns the visible tab list, selected tab, address bar state, scan state, assistant state, and active runtime target ID. Bookmarks are held in the main-process profile and pushed to the shell as snapshots. BrowserWebView.tsx normally creates a guest tab through browser:create-tab when mounted and closes it when unmounted. For a site-created popup, it instead adopts the existing webContents ID supplied by main. The component keeps that ID as its handle; Electron main keeps the matching WebContentsView.
 
-The browser toolbar offers address/search submission, back, forward, reload/stop, bookmark toggling, manual Scan, and the AI sidebar. The shell also provides new and close tab behavior and persists bookmarks and assistant width in renderer localStorage. The new-tab/home screen is rendered by React. Outside Electron, BrowserWebView renders an iframe preview; the main-process browser runtime is available only in Electron.
+The browser toolbar offers address/search submission, back, forward, reload/stop, bookmark toggling, manual Scan, and the AI sidebar. The shell also provides new and close tab behavior, and persists assistant width in renderer localStorage. Closing the last tab closes that window. The toolbar menu button and a download indicator open overlay panels, and the bookmark bar can be hidden from Settings. The new-tab/home screen is rendered by React. Outside Electron, BrowserWebView renders an iframe preview; the main-process browser runtime is available only in Electron.
 
 Main sends loading, navigation, title, favicon, and load-failure events back to the renderer. BrowserWebView reports its React container bounds to main so the native guest view can be placed over that area. It gives the view zero bounds when its tab is inactive, the home screen or an error is shown, or a drawer/modal or resize interaction must cover it.
 
-BrowserToolbar and BrowserWebView implement the main browser surface. AiAssistantSidebar hosts Chat and AgentModePanel. WebpageAnalysisDetailsPanel and PromptAnalysisDetailsPanel display separate detector results; ProviderSettingsModal manages AI connections. These components receive state and callbacks from the shell rather than owning guest webContents directly.
+BrowserToolbar and BrowserWebView implement the main browser surface; BrowserWebView also reports the active tab and the page zoom to main. AiAssistantSidebar hosts Chat and AgentModePanel. WebpageAnalysisDetailsPanel and PromptAnalysisDetailsPanel display separate detector results; ProviderSettingsModal manages AI connections. These components receive state and callbacks from the shell rather than owning guest webContents directly.
 
 ### Popup authentication, downloads, and browser lifetime
 
@@ -91,7 +101,17 @@ Guest `window.open` and target-blank requests are routed into the main tab strip
 
 Normal tabs use the default Electron session; popups explicitly share their opener's session. Chromium owns cookies and authentication state. This is separate from agent session memory. The implementation is intended to preserve sign-in across tab navigation and refresh; the local popup/cookie regression test does not establish compatibility with every live OAuth provider.
 
-`webviewContextMenu.ts` provides native navigation, save, inspection, and DevTools actions. Downloads on `session.defaultSession` invoke an Electron save-location dialog; cancellation cancels the download. There is no planner download tool or agent-facing filesystem verification of the saved file. Tabs themselves are held in renderer/main memory, without implemented restoration of the previous tab list after restart.
+`webviewContextMenu.ts` provides native navigation, save, inspection, and DevTools actions, including Save Link As and Save Image As, which always ask for a location. Downloads on `session.defaultSession` are tracked by BrowserUIController (see the next subsection). There is no planner download tool or agent-facing filesystem verification of the saved file. Tabs themselves are held in renderer/main memory, without implemented restoration of the previous tab list after restart.
+
+### Browser menu overlay, saved profile, and windows
+
+The toolbar menu opens a transparent child `WebContentsView` that BrowserUIController stacks above the guest tabs, so a website cannot cover it and the page keeps running underneath. It loads the renderer with `?surface=browser-overlay` and renders New tab, New window, History, Downloads, Bookmarks, Delete browsing data, Zoom, Print, Settings, About, and Exit using Radix menu and dialog primitives. The overlay view uses context isolation, no Node integration, and `sandbox: false`, and it blocks navigation and window creation. Ctrl shortcuts (new tab, new window, history, downloads, bookmarks, bookmark page, address bar, close tab, tab switching, zoom, print), Alt+F, and F11 are handled by `before-input-event` on the shell, the overlay, and every guest.
+
+BrowserProfileStore keeps up to 10,000 history visits, 5,000 bookmarks, and 500 download records, plus settings (download folder, ask where to save, bookmark-bar visibility, default zoom), in `browser-profile.json` under userData. Writes are debounced and saved by temporary file and rename. The profile is shared by all Orbit windows, and legacy localStorage bookmarks are imported once. Only http, https, and file URLs are accepted into it. Page zoom is remembered per origin for the running session; only the default zoom is saved.
+
+Downloads use Electron's `will-download`, with sanitized filenames, non-overwriting names, an optional per-download save dialog, and progress, pause, resume, cancel, retry, open, and show-in-folder controls. Delete browsing data filters history and download records by time range, but Electron clears cookies, site storage, and cache for the whole session regardless of range.
+
+Each window owns its tabs (`tabOwners`); popups join their opener's window. Reloading or crashing a shell renderer releases that window's tabs and shields. These are browser conveniences, not agent features: the planner has no tool for the profile or the menu.
 
 ## Chapter 5 — CDP Capture and Browser Actions
 
@@ -103,7 +123,7 @@ Capture is bounded: the frame collector normally caps each channel at 30,000 cha
 
 The agent BrowserRuntime accepts commands through the runtime contract in frontend/electron/browserRuntime/runtimeContract.ts, mirrored in frontend/src/types/browserRuntimeTypes.ts. Its page-state builder turns accessibility-tree data into a capped PageStateSnapshot containing named controls, element IDs, values and control states, nearby text/container context, focus, dialogs, validation errors, selection, URL, title, capture time, and a truncation flag. It caps interactive elements at 500, dialogs at 25, and validation issues at 50; the backend planner renders at most 450 elements. Element handles stay inside main and are refreshed on state extraction or invalidated by runtime navigation. They are not durable identifiers across planning rounds.
 
-Runtime commands include target description, navigation, click, fill, type, key press, scroll, upload, navigation/DOM waits, screenshot, semantic state extraction, a security snapshot, visual overlay, JavaScript evaluation, selector bounds, direct mouse events, drag, and virtual-table extraction. The runtime resolves controls to CDP nodes/coordinates, dispatches input through CDP, settles the page, and returns action verification where applicable. These are Chromium CDP input events rather than operating-system input automation. The planner registry accepts absolute HTTP(S) navigation URLs; the lower-level runtime additionally accepts the `about:` scheme. These checks do not inspect all subsequent redirects or link destinations.
+Runtime commands include target description, navigation, click, fill, type, key press, scroll, upload, navigation/DOM waits, screenshot, semantic state extraction, a security snapshot, visual overlay, JavaScript evaluation, selector bounds, direct mouse events, drag, and virtual-table extraction. The runtime resolves controls to CDP nodes/coordinates, dispatches input through CDP, settles the page, and returns action verification where applicable. `fieldProbe.ts` supports `fill`: it reads, without assigning a value, which field has focus (following open shadow roots and same-origin frames) and what it holds, so a fill is judged by whether the text landed. It has a recipient-field variant for token inputs that turn text into chips. A field whose content cannot be compared, or a cross-origin frame, is reported as unverifiable rather than as success. These are Chromium CDP input events rather than operating-system input automation. The planner registry accepts absolute HTTP(S) navigation URLs; the lower-level runtime additionally accepts the `about:` scheme. These checks do not inspect all subsequent redirects or link destinations.
 
 `advancedBrowser.ts` evaluates planner-supplied JavaScript in the registered guest page with a default 5-second evaluation timeout, a maximum 15-second timeout, and JSON output capped at 100,000 characters. Selector bounds support open-shadow-root selectors using `>>>`. Mouse coordinates are guest-viewport CSS coordinates and are validated against the viewport. Drag interpolates a left-button gesture and releases the button in a finally block. Virtual-table extraction reads recycled rows afresh, deduplicates stable IDs, checks contiguous row indices, and returns row evidence, missing indices, a completeness flag, and TSV. It defaults to 20 rows and limits requests to 100 rows, 20 columns, 100 wheel events, and a 25-second collection deadline. These observations enter working memory and trigger replanning before dependent actions.
 
@@ -120,6 +140,7 @@ backend-node/src/app.ts registers these route groups under the configured prefix
 | GET /health | Reports health, backend/runtime versions, model load status, classifier mode, and model precision. |
 | POST /security/check-prompt | Classifies a nonempty direct prompt and returns a detailed decision. |
 | POST /security/check-webpage | Classifies nonempty captured webpage channels separately and returns a detailed decision. |
+| POST /security/explain-scan | Takes a finished scan's analysis details and returns a three-paragraph plain-language summary, written by the active provider or by a built-in local fallback. |
 | GET /security/events | Returns recent security-analysis events from an in-memory store. |
 | POST /llm/chat | Rechecks the supplied prompt, then sends approved chat data to the active provider or returns the no-provider response. |
 | POST /agent/plan | Uses the active provider to produce and validate an action queue for the given goal, working memory, and page state. |
@@ -129,15 +150,15 @@ backend-node/src/app.ts registers these route groups under the configured prefix
 | GET, POST, DELETE /providers/active | Reads, sets, or clears the provider active in backend memory. |
 | POST /providers/configured | Loads configured providers into backend memory for fallback operations. |
 
-Fastify uses TypeBox request/response schemas on the principal security, chat, agent, and provider routes, with a 50 MiB request-body limit. app.ts waits for local classifier loading to finish, successfully or in fallback mode, before registering routes. Request validation failures use status 422 and a `{detail}` body; empty prompts/goals or scans without classified content use 400, unknown routes use 404, and unhandled server failures use an Internal Server Error detail. Agent provider failures use 502. No crawler, `/agent/security/check-page`, agent-security-events, or audio-transcription route is registered.
+Fastify uses TypeBox request/response schemas on the principal security, chat, agent, and provider routes, with a 50 MiB request-body limit. app.ts waits for local classifier loading to finish, successfully or in fallback mode, before registering routes. Request validation failures use status 422 and a `{detail}` body; empty prompts/goals or scans without classified content use 400, unknown routes use 404, and unhandled server failures use an Internal Server Error detail. Agent provider failures use 502. The explain-scan response is `{summary, source, provider?, model?, note?}`. No crawler, `/agent/security/check-page`, agent-security-events, or audio-transcription route is registered.
 
 ## Chapter 7 — Prompt-Injection Detection
 
 The manual security routes use analyzeText in backend-node/src/routes/security.routes.ts. It preprocesses input, splits each source into overlapping chunks, calls promptClassifier.classifyMany once for the batch, and aggregates the result. Defaults are 800 characters per chunk with 100 characters of overlap. A single malicious chunk makes the overall decision disallowed. Direct prompts are chunked after preprocessing; webpage channels are chunked from their original channel text to retain source evidence. Preprocessing strips HTML where applicable, lowercases, and normalizes whitespace. Its token_count is a whitespace-word count, not the transformer tokenizer count; Unicode NFKC normalization is not implemented.
 
-promptClassifier runs the rule detector and, when loaded, the local Prompt Guard 2 classifier. A chunk is malicious when either detector matches. The rule detector reports matched categories and phrases; the model supplies a MALICIOUS score. Results carry detector source, confidence, matched patterns, and per-chunk explanations for the UI. The response also contains preprocessing and chunking metadata, feature evidence, a final rationale, classifier mode, and model precision.
+promptClassifier runs the rule detector and, when loaded, the local Prompt Guard 2 classifier. A chunk is malicious when either detector matches. The rule detector reports matched categories and phrases; the model supplies a MALICIOUS score. Results carry detector source, confidence, matched patterns, and per-chunk explanations for the UI. For a chunk flagged only by the model, with no rule evidence, the route re-scores sentence-sized pieces of that chunk and shows the highest-scoring piece as the excerpt instead of the chunk prefix. This costs an extra inference pass and is a display aid only. The response also contains preprocessing and chunking metadata, feature evidence, a final rationale, classifier mode, and model precision.
 
-The five rule categories in backend-node/src/core/securityConstants.ts are override_instructions, jailbreak_attempt, hidden_instruction, system_prompt_reveal, and data_exfiltration. RuleBasedDetectorService uses whole-word matching at alphanumeric term boundaries. Common short or ambiguous terms, including dan, jailbreak, and upload to, require nearby instruction-like wording before they count; the proximity window is 160 characters.
+The five rule categories in backend-node/src/core/securityConstants.ts are override_instructions, jailbreak_attempt, hidden_instruction, system_prompt_reveal, and data_exfiltration. RuleBasedDetectorService uses whole-word matching at alphanumeric term boundaries. Common short or ambiguous terms, including dan, jailbreak, and upload to, require nearby instruction-like wording before they count; the proximity window is 160 characters. A second set of shape-based regular expressions per category (for example an override verb aimed at instructions, an order to reveal the system prompt, or an order to hand over tokens or cookies) catches reworded attacks that exact phrase lists miss. Each requires both a verb and its target.
 
 The ONNX model loader reads local fp32 Llama Prompt Guard 2 22M artifacts from MODEL_DIR through @huggingface/transformers and onnxruntime-node. Repository model configuration identifies a DeBERTa-v3-xsmall backbone and BENIGN/MALICIOUS labels; SOURCE.md documents provenance. The model pipeline is cached once per backend process and remote model loading is disabled. If it cannot load, the service reports rule_based_fallback and continues with rules. If an already-loaded model throws during inference, the classifier marks the affected batch malicious and records an error instead of treating it as clean.
 
@@ -169,6 +190,8 @@ The backend classifies **13 channels**, comprising 11 core channels and two exte
 
 page_title and url accompany capture but are not classified channels. Captured dom_snapshot_content is deliberately excluded. Redirects, third-party resources, suspicious domains, frame-navigation logs, runtime-script activity, and loaded-resource logs are not current scan channels, even where older documents describe a 22-channel scanner.
 
+Both reports include a summary section. ScanSummarySection calls POST /security/explain-scan with the structured analysis details. When a provider is active, scanSummaryService sends it only a digest (verdict, detector outcomes, at most eight flagged chunks, each excerpt capped at 400 characters and JSON-quoted) under a system prompt that calls the data untrusted, with a 40-second timeout. With no provider, or on failure or an empty answer, it returns a built-in local summary and a note saying why. The summary explains the verdict and never alters it, but excerpts of flagged text do leave the machine when a provider is active.
+
 The manual scan produces a report for the user. It does not automatically stop ordinary browser navigation or automatically scan every page load. Capture and classification happen when the user invokes Scan.
 
 ## Chapter 9 — AI Chat
@@ -177,7 +200,7 @@ AiAssistantSidebar.tsx provides chat sessions and Agent Mode in the same sidebar
 
 On chat submission, the sidebar calls POST /security/check-prompt for the user's typed prompt. It calls POST /llm/chat only if that response allows the prompt. /llm/chat classifies the prompt again and rejects a malicious result with HTTP 403 before forwarding. llmProviderManager builds a provider message from its system instruction, recent history, optional page context, attachments, and the user request. With no active provider, chat returns an explicit no-provider response; Agent Mode planning instead returns unavailable.
 
-The current checks cover the prompt field. The attached page text, prior history, and file attachments are not individually passed through the webpage or prompt scanner on this chat path. The final /llm/chat check also classifies only the prompt field. A manual Scan result does not become an automatic chat authorization gate.
+The current checks cover the prompt field. The attached page text, prior history, and file attachments are not individually passed through the webpage or prompt scanner on this chat path. The final /llm/chat check also classifies only the prompt field. The prompt analysis panel can request an explain-scan summary of the prompt's verdict. A manual Scan result does not become an automatic chat authorization gate.
 
 ### Attachments and model selection
 
@@ -236,6 +259,10 @@ The planner interprets the original goal language, including Roman Urdu, in the 
 
 AgentModePanel displays the goal, action timeline, public planning/activity summaries, approval requests, stop control, and a result that can expand into a modal. AgentResultMessage renders structured output and Markdown. The panel remains mounted when the user switches to Chat, preserving a running task; starting a new agent task remounts it and aborts the previous task. Cancellation is observed between actions and in planner fetches; an already-dispatched CDP operation need not stop immediately. A running task keeps its own target ID; changing the visible browser tab does not automatically retarget it. The loop retargets through its open_tab operation.
 
+### Agent input shield
+
+While a task runs, AgentTask calls `browser:set-agent-lock` for its target, and AgentInputShield stacks a transparent, sandboxed `WebContentsView` over that tab. The shield swallows the user's real mouse, wheel, and keyboard events and shows an "Agent mode is active" toast with a Stop button. The agent is unaffected because CDP `Input.dispatch*` events go straight to the guest renderer rather than through on-screen hit testing. Stop navigates the shield to a sentinel URL that main intercepts and forwards to the renderer as `agent:stop-requested`. The shield follows the tab's bounds, moves to the new tab when `open_tab` retargets the task, and is removed when the task ends, the tab or window closes, or the shell reloads or crashes. It prevents accidental interference and is not a security boundary against the page.
+
 Agent Mode does not scan pages or its goal. The agent security pipeline, circuit breaker, threat-details modal, and backend agent security service/event store were removed, and /agent/plan does not classify the page state or goal it receives. Page state and observations reach the provider without that gate. Remaining defenses are planner instructions, tool/runtime validation, approval heuristics, bounded loop guards, and checks of existing blocked-origin flags. The Browser Runtime still has a security-snapshot command, but nothing in the agent loop calls it or classifies its output. The manual Scan action is the only current prompt-injection classification of captured webpage channels.
 
 ## Chapter 11 — AI Providers and Stored Data
@@ -246,12 +273,13 @@ Provider gateway implementations cover OpenAI-compatible endpoints, Anthropic, a
 
 ProviderSecureStore uses Electron safeStorage encryption when available. When it is unavailable or encryption fails, it stores the key with a b64: Base64 prefix, which is encoding rather than encryption. Candidate keys also pass through renderer memory and the local HTTP API for model listing/testing before secure storage. The non-Electron providerApiClient fallback stores provider metadata in localStorage after deleting api_key from the saved object; credentials used to activate a provider remain in backend process memory and are not restored from that metadata after restart. This fallback is not an equivalent credential vault.
 
-Renderer localStorage also holds bookmarks, assistant width, chat sessions, and origin-based agent browser memory. Security events and the backend's provider state are in memory and do not survive a backend restart on their own.
+Renderer localStorage holds assistant width, chat sessions, and origin-based agent browser memory, plus a legacy bookmark copy that is read for migration and used as the fallback outside Electron. Bookmarks, history, download records, and browser settings live in the main-process profile. Security events and the backend's provider state are in memory and do not survive a backend restart on their own.
 
 | Data | Storage owner/location | Persistence |
 | --- | --- | --- |
 | Website cookies/authentication | Chromium default/opener Electron session under app userData. | Managed by Chromium and cookie lifetime. |
-| Bookmarks and sidebar width | Renderer localStorage. | Survives renderer/app restart when storage remains available. |
+| Bookmarks, history, download records, browser settings | Main-process browser-profile.json under app userData. | Persistent and shared by all windows; capped at 5,000 bookmarks, 10,000 history entries, 500 downloads. |
+| Sidebar width | Renderer localStorage. | Survives renderer/app restart when storage remains available. |
 | Chat sessions and message attachments | Renderer localStorage. | Best effort; large attachment data can exceed storage quota. |
 | Active task, timeline, progress, ledger | AgentTask/AgentModePanel in renderer memory. | Not restored after renderer restart. |
 | Cross-task summaries | AgentSessionMemory singleton in renderer memory. | Last five task summaries in this renderer lifetime. |
@@ -259,13 +287,13 @@ Renderer localStorage also holds bookmarks, assistant width, chat sessions, and 
 | Provider configurations/keys | Main-process provider_settings.json under app userData. | Persists with safeStorage encryption or Base64 fallback. |
 | Active/configured backend providers | LlmProviderManager process memory. | Restored by a later main-process synchronization attempt. |
 | Security event summaries | securityEventStore process memory, 50-entry cap. | Lost on backend restart. |
-| Downloaded files | User-selected save locations. | Files remain, but no agent download ledger is implemented. |
+| Downloaded files | Configured download folder, or a location chosen per download. | Files remain; Orbit keeps only the record list, and no agent download ledger is implemented. |
 
 ## Chapter 12 — Implemented Security Boundaries and Limits
 
-The app window sets nodeIntegration=false, contextIsolation=true, webSecurity=true, and **sandbox=false**. Guest WebContentsViews use context isolation and **sandbox=true**; popup preferences additionally explicitly disable Node integration. These are distinct renderer policies. electronSecurityConfig.ts blocks app-window navigation outside URLs accepted by its current trust predicate, denies shell-created windows, and adds nosniff and no-referrer response headers on the shared default session. The development URL check uses startsWith('http://localhost:5173'), and packaged trust accepts file:// generally rather than one exact file path; it should not be described as exact-origin/path enforcement.
+The app window sets nodeIntegration=false, contextIsolation=true, webSecurity=true, and **sandbox=false**. Guest WebContentsViews use context isolation and **sandbox=true**; popup preferences additionally explicitly disable Node integration. The browser-menu overlay view also uses context isolation but `sandbox: false`, and it shares the preload bridge, so it sits inside the same trust boundary as the shell. The agent input shield view is sandboxed with no preload. These are distinct renderer policies. electronSecurityConfig.ts blocks app-window navigation outside URLs accepted by its current trust predicate, denies shell-created windows, and adds nosniff and no-referrer response headers on the shared default session. The development URL check uses startsWith('http://localhost:5173'), and packaged trust accepts file:// generally rather than one exact file path; it should not be described as exact-origin/path enforcement.
 
-The preload exposes explicit operations rather than Node.js or a generic IPC channel. Main checks the app-window sender ID for tab/runtime/manual-scan requests, not a cryptographic identity or every provider operation. A `browser:execute-javascript` IPC operation is **not** exposed by the current bridge. Guest-page execution instead exists as the privileged `evaluate` runtime command and is available to the planner.
+The preload exposes explicit operations rather than Node.js or a generic IPC channel. Main checks that tab, runtime, and manual-scan requests come from the main frame of a registered shell window and that the tab belongs to that window. This is not a cryptographic identity, and it does not cover every provider operation. A `browser:execute-javascript` IPC operation is **not** exposed by the current bridge. Guest-page execution instead exists as the privileged `evaluate` runtime command and is available to the planner.
 
 The detection gate applies to the submitted chat prompt, and the manual scanner reports captured webpage content. It does not enforce a universal rule that every piece of page or attachment content is scanned before an AI provider sees it. Optional chat page context/history/attachments and Agent Mode goals/page state/findings bypass automatic injection classification. Capture limits, closed shadow roots, external-resource references, child-frame aggregation, and failed CDP collection restrict scan coverage. Rule-only fallback loses model-based detection, while loaded-model inference errors fail closed for classification calls.
 
@@ -305,7 +333,7 @@ From frontend/, npm run dev starts the development processes; npm run build buil
 
 From backend-node/, npm run build compiles the backend, npm run dev starts the TypeScript watcher, and npm test runs Vitest in a single fork. Backend suites cover rule precision, chunking, hybrid classification, model fallback, token-window splitting, analysis schemas, routes, provider gateways, and planner/tool-queue validation. Live provider behavior is not established by mocked gateway/planner tests.
 
-From frontend/, npm run electron:build compiles main/preload, npm run build builds all application layers, npm run test:e2e runs desktop Playwright, and npm run lint runs ESLint. Playwright uses one worker and keeps failure screenshots/traces. Suites cover startup, navigation controls, assistant modes, provider UI, CDP semantic extraction/input/screenshot/security-capture/navigation rejection, and a local popup-cookie-refresh fixture. The security-capture test exercises a retained sensor, not an automatic agent scan. scripts/validate-agent-memory.ts checks duplicate-content handling; scripts/validate-upgrades.ts also exercises retained helpers and contains historical confidence expectations that must not be substituted for current policy.
+The frontend now depends at runtime on @radix-ui/react-dialog, @radix-ui/react-dropdown-menu, framer-motion, and lucide-react for the overlay. From frontend/, npm run electron:build compiles main/preload, npm run build builds all application layers, npm run test:e2e runs desktop Playwright, and npm run lint runs ESLint. Playwright uses one worker and keeps failure screenshots/traces. Suites cover startup, navigation controls, assistant modes, the agent input shield, provider UI, the browser menu, shortcuts, zoom, history, bookmarks, downloads, multi-window isolation, and profile persistence (browserMenu.spec.ts, which uses an isolated `ORBIT_USER_DATA_DIR`), CDP semantic extraction/input/screenshot/security-capture/navigation rejection, and a local popup-cookie-refresh fixture. The security-capture test exercises a retained sensor, not an automatic agent scan. scripts/validate-agent-memory.ts checks duplicate-content handling; scripts/validate-upgrades.ts also exercises retained helpers and contains historical confidence expectations that must not be substituted for current policy.
 
 Tests and diagrams describe implemented mechanisms; they do not establish measured attack-detection accuracy, complete website coverage, live Google OAuth compatibility, safe execution of arbitrary agent plans, or clean-machine installer behavior. Current review findings and verification results are recorded in [architecture-audit.md](architecture-audit.md).
 
@@ -313,16 +341,19 @@ Tests and diagrams describe implemented mechanisms; they do not establish measur
 
 | Architectural responsibility | Primary source of truth |
 | --- | --- |
-| Shell startup, guest ownership, popup/session handling, IPC checks, downloads | frontend/electron/main.ts, preload.ts, electronSecurityConfig.ts, webviewContextMenu.ts. |
+| Shell startup, window and guest ownership, popup/session handling, IPC checks | frontend/electron/main.ts, preload.ts, electronSecurityConfig.ts, webviewContextMenu.ts. |
+| Menu overlay, shortcuts, zoom, downloads, saved profile | frontend/electron/browserUIController.ts, browserProfileStore.ts, browserUITypes.ts; src/components/BrowserOverlay.tsx, BrowserOverlayLoader.tsx; docs/browser-menu-implementation.md. |
+| Agent input lock | frontend/electron/agentInputShield.ts; main.ts (`browser:set-agent-lock`); src/services/browserRuntime.ts; components/AgentModePanel.tsx. |
 | Backend process start/stop and readiness | frontend/electron/backendProcess.ts; frontend/package.json. |
 | Tab UI, native bounds, bookmarks, scan orchestration, deferred surfaces | frontend/src/App.tsx; components/BrowserShell.tsx, BrowserWebView.tsx; utils/deferredComponent.ts. |
 | Manual capture and channel coverage | frontend/electron/cdpInspectionService.ts; backend-node/src/routes/security.routes.ts. |
 | Rules, preprocessing, chunking, explanations, model lifecycle/inference | backend-node/src/services/{ruleBasedDetectorService,promptPreprocessingService,textChunkingService,promptClassifierService,featureExplanationService}.ts; src/dl/. |
+| Scan summaries | backend-node/src/services/scanSummaryService.ts; routes/security.routes.ts; frontend/src/components/ScanSummarySection.tsx; services/backendApiClient.ts. |
 | Chat checks, history, page/attachment composition | frontend/src/components/AiAssistantSidebar.tsx, PromptInputBox.tsx; backend-node/src/routes/llm.routes.ts; services/llmProviderManager.ts, documentTextExtractor.ts. |
 | Planner instructions, bounded context, JSON parsing, tool catalogue/queue validation | backend-node/src/services/agentPlannerService.ts, agentToolRegistry.ts; routes/agent.routes.ts; schemas/agent.schemas.ts. |
 | Agent execution, approvals, task/session memory, activity/results | frontend/src/services/agentRuntimeCore.ts, agentApprovalPolicy.ts, agentWorkingMemory.ts, agentSessionMemory.ts, agentActivity.ts; components/AgentModePanel.tsx, AgentResultMessage.tsx. |
 | Retained origin-memory/recovery facilities | frontend/src/services/agentBrowserMemory.ts, agentRecoveryEngine.ts; distinguish exposed helpers from active loop callers. |
-| Runtime targets, AX state, input, advanced tools, settling, verification, overlay | frontend/electron/browserRuntime/{browserRuntime,cdpSession,stateBuilder,pageInspector,elementResolver,nativeInput,advancedBrowser,waitEngine,verificationEngine,virtualCursor,runtimeContract}.ts. |
+| Runtime targets, AX state, input, advanced tools, settling, verification, overlay | frontend/electron/browserRuntime/{browserRuntime,cdpSession,stateBuilder,pageInspector,elementResolver,nativeInput,fieldProbe,advancedBrowser,waitEngine,verificationEngine,virtualCursor,runtimeContract}.ts. |
 | Provider metadata, key storage/sync, gateway formats | frontend/src/services/providerApiClient.ts; electron/providerSecureStore.ts; backend-node/src/routes/providers.routes.ts; services/llmGateways/. |
 | Environment, routes, errors, local binding | backend-node/src/config/env.ts, app.ts, server.ts. |
 | Packaging and artifact/dependency staging | frontend/electron-builder.yml; scripts/stage-backend.mjs; backend-node/dl_models/prompt_injection_model/SOURCE.md. |
@@ -338,4 +369,5 @@ The architecture is a description of the current implementation, not a claim tha
 5. Scan collection is capped and best effort; external script/source-map bodies, complete child-frame channels, and closed shadow roots are outside current coverage.
 6. Completed status can come directly from finish, and unverifiable typing is treated as delivered; no independent final-result/download validation exists.
 7. Backend authentication, uniform provider IPC sender validation, exact app-navigation trust matching, and guaranteed encrypted credential fallback are not implemented.
-8. README.md, backend-node/MIGRATION.md, and architecture.html contain historical or separately maintained descriptions. They are not generated automatically from this document and must be reconciled separately before being used as authoritative thesis or deployment evidence.
+8. Scan explanations send bounded excerpts of flagged page or prompt text to the active provider, and the menu overlay runs with `sandbox: false` and the shared preload. "Delete browsing data" clears site data and cache for all time whatever range is selected.
+9. README.md, backend-node/MIGRATION.md, and architecture.html contain historical or separately maintained descriptions. They are not generated automatically from this document and must be reconciled separately before being used as authoritative thesis or deployment evidence.

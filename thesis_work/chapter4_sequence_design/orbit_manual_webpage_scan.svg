@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2200" height="1460" viewBox="0 0 2200 1460">
+<rect width="100%" height="100%" fill="white"/>
+<text x="1100" y="55" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="47" font-weight="700" fill="#192b37">Sequence Diagram: Manual Webpage Scan</text>
+<line x1="110" y1="105" x2="2090" y2="105" stroke="#d9e4ea" stroke-width="2"/>
+<rect x="18" y="130" width="354" height="81" fill="#e4f2f9" stroke="#276487" stroke-width="3"/>
+<text x="195" y="170" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="36" font-weight="700" fill="#192b37">User</text>
+<line x1="195" y1="212" x2="195" y2="1315" stroke="#a4b3bd" stroke-width="2" stroke-dasharray="8 9"/>
+<line x1="160" y1="1315" x2="230" y2="1315" stroke="#a4b3bd" stroke-width="2"/>
+<rect x="471" y="130" width="354" height="81" fill="#e4f2f9" stroke="#276487" stroke-width="3"/>
+<text x="648" y="153" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="33" font-weight="700" fill="#192b37">React Browser</text>
+<text x="648" y="190" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="33" font-weight="700" fill="#192b37">Shell</text>
+<line x1="648" y1="212" x2="648" y2="1315" stroke="#a4b3bd" stroke-width="2" stroke-dasharray="8 9"/>
+<line x1="613" y1="1315" x2="683" y2="1315" stroke="#a4b3bd" stroke-width="2"/>
+<rect x="923" y="130" width="354" height="81" fill="#e4f2f9" stroke="#276487" stroke-width="3"/>
+<text x="1100" y="153" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="33" font-weight="700" fill="#192b37">Electron Main</text>
+<text x="1100" y="190" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="33" font-weight="700" fill="#192b37">and CDP</text>
+<line x1="1100" y1="212" x2="1100" y2="1315" stroke="#a4b3bd" stroke-width="2" stroke-dasharray="8 9"/>
+<line x1="1065" y1="1315" x2="1135" y2="1315" stroke="#a4b3bd" stroke-width="2"/>
+<rect x="1375" y="130" width="354" height="81" fill="#e4f2f9" stroke="#276487" stroke-width="3"/>
+<text x="1552" y="170" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="36" font-weight="700" fill="#192b37">Guest Webpage</text>
+<line x1="1552" y1="212" x2="1552" y2="1315" stroke="#a4b3bd" stroke-width="2" stroke-dasharray="8 9"/>
+<line x1="1517" y1="1315" x2="1587" y2="1315" stroke="#a4b3bd" stroke-width="2"/>
+<rect x="1828" y="130" width="354" height="81" fill="#e4f2f9" stroke="#276487" stroke-width="3"/>
+<text x="2005" y="153" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="33" font-weight="700" fill="#192b37">Local Security</text>
+<text x="2005" y="190" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="33" font-weight="700" fill="#192b37">API</text>
+<line x1="2005" y1="212" x2="2005" y2="1315" stroke="#a4b3bd" stroke-width="2" stroke-dasharray="8 9"/>
+<line x1="1970" y1="1315" x2="2040" y2="1315" stroke="#a4b3bd" stroke-width="2"/>
+<rect x="68" y="1015" width="2064" height="305" fill="#ffffff" stroke="#83569a" stroke-width="2" stroke-dasharray="11 8"/>
+<rect x="68" y="1015" width="349" height="43" fill="#ffffff" stroke="#83569a" stroke-width="2"/>
+<text x="84" y="1036" text-anchor="start" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="#83569a">opt [report explanation]</text>
+<line x1="195" y1="280" x2="648" y2="280" stroke="#276487" stroke-width="3"/>
+<polygon points="630,270 648,280 630,290" fill="#276487"/>
+<text x="421" y="255" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="29" font-weight="400" fill="#192b37">1. Select Scan</text>
+<line x1="648" y1="370" x2="1100" y2="370" stroke="#276487" stroke-width="3"/>
+<polygon points="1082,360 1100,370 1082,380" fill="#276487"/>
+<text x="874" y="345" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="29" font-weight="400" fill="#192b37">2. scanWebview(tab ID)</text>
+<line x1="1100" y1="460" x2="1552" y2="460" stroke="#276487" stroke-width="3"/>
+<polygon points="1534,450 1552,460 1534,470" fill="#276487"/>
+<text x="1326" y="435" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="29" font-weight="400" fill="#192b37">3. Capture page channels</text>
+<line x1="1552" y1="550" x2="1100" y2="550" stroke="#517c95" stroke-width="3" stroke-dasharray="12 8"/>
+<polygon points="1118,540 1100,550 1118,560" fill="#517c95"/>
+<text x="1326" y="525" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="29" font-weight="400" fill="#192b37">4. Captured content</text>
+<line x1="1100" y1="640" x2="648" y2="640" stroke="#517c95" stroke-width="3" stroke-dasharray="12 8"/>
+<polygon points="666,630 648,640 666,650" fill="#517c95"/>
+<text x="874" y="615" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="29" font-weight="400" fill="#192b37">5. Page content</text>
+<line x1="648" y1="730" x2="2005" y2="730" stroke="#276487" stroke-width="3"/>
+<polygon points="1987,720 2005,730 1987,740" fill="#276487"/>
+<text x="1326" y="705" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="29" font-weight="400" fill="#192b37">6. POST /security/check-webpage</text>
+<polyline points="2005,813 2140,813 2140,842 2005,842" fill="none" stroke="#276487" stroke-width="3"/>
+<polygon points="2022,833 2005,842 2022,851" fill="#276487"/>
+<text x="1990" y="785" text-anchor="end" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="28" font-weight="400" fill="#192b37">7. Chunk and classify</text>
+<line x1="2005" y1="920" x2="648" y2="920" stroke="#517c95" stroke-width="3" stroke-dasharray="12 8"/>
+<polygon points="666,910 648,920 666,930" fill="#517c95"/>
+<text x="1326" y="895" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="29" font-weight="400" fill="#192b37">8. Verdict and evidence</text>
+<line x1="648" y1="1000" x2="195" y2="1000" stroke="#517c95" stroke-width="3" stroke-dasharray="12 8"/>
+<polygon points="213,990 195,1000 213,1010" fill="#517c95"/>
+<text x="421" y="975" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="29" font-weight="400" fill="#192b37">9. Show analysis report</text>
+<line x1="648" y1="1090" x2="2005" y2="1090" stroke="#276487" stroke-width="3"/>
+<polygon points="1987,1080 2005,1090 1987,1100" fill="#276487"/>
+<text x="1326" y="1065" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="29" font-weight="400" fill="#192b37">10. POST /security/explain-scan</text>
+<line x1="2005" y1="1180" x2="648" y2="1180" stroke="#517c95" stroke-width="3" stroke-dasharray="12 8"/>
+<polygon points="666,1170 648,1180 666,1190" fill="#517c95"/>
+<text x="1326" y="1155" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="29" font-weight="400" fill="#192b37">11. Plain-language summary</text>
+<line x1="648" y1="1270" x2="195" y2="1270" stroke="#517c95" stroke-width="3" stroke-dasharray="12 8"/>
+<polygon points="213,1260 195,1270 213,1280" fill="#517c95"/>
+<text x="421" y="1245" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="29" font-weight="400" fill="#192b37">12. Show summary</text>
+<text x="1100" y="1368" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="27" font-weight="400" fill="#4e606b">Classification uses rules and the local model when available.</text>
+<text x="1100" y="1401" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="27" font-weight="400" fill="#4e606b">The report does not automatically block navigation.</text>
+</svg>

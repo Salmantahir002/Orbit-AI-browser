@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { AnalysisDetails, ChunkResult } from '../types/analysisDetailsTypes'
 import { ScanSummarySection } from './ScanSummarySection'
 
@@ -7,145 +8,94 @@ type Props = {
   onClose: () => void
 }
 
-// ── Icons ────────────────────────────────────────────────────────────────────
+// ── Icons (Lucide style) ──────────────────────────────────────────────────────
 
 function ShieldCheckIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 22, height: 22 }}>
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-      <polyline points="9 12 12 15 16 10" />
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+      <path d="m9 12 2 2 4-4" />
     </svg>
   )
 }
 
-function ShieldXIcon() {
+function ShieldAlertIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 22, height: 22 }}>
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-      <line x1="9" y1="9" x2="15" y2="15" />
-      <line x1="15" y1="9" x2="9" y2="15" />
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+      <path d="M12 8v4" />
+      <path d="M12 16h.01" />
     </svg>
   )
 }
 
-function AlertTriangleIcon() {
+function CloseIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-      <line x1="12" y1="9" x2="12" y2="13" />
-      <line x1="12" y1="17" x2="12.01" y2="17" />
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
     </svg>
   )
 }
 
-function ScanIcon() {
+function LayersIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z" />
+      <path d="m22 12.5-8.58 3.91a2 2 0 0 1-1.66 0L2 12.5" />
+      <path d="m22 17.5-8.58 3.91a2 2 0 0 1-1.66 0L2 17.5" />
     </svg>
   )
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
-
-function CountBadge({ count, label, danger = false }: { count: number; label: string; danger?: boolean }) {
-  const isAlert = danger && count > 0
+function FileTextIcon() {
   return (
-    <div
-      style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 4,
-        padding: '14px 8px',
-        borderRadius: 10,
-        background: isAlert ? 'rgba(248,113,113,0.07)' : 'rgba(255,255,255,0.03)',
-        border: `1px solid ${isAlert ? 'rgba(248,113,113,0.20)' : 'rgba(255,255,255,0.07)'}`,
-      }}
-    >
-      <span
-        style={{
-          fontSize: 22,
-          fontWeight: 800,
-          fontFamily: "'JetBrains Mono', monospace",
-          color: isAlert ? '#f87171' : 'rgba(255,255,255,0.85)',
-          lineHeight: 1,
-        }}
-      >
-        {count}
-      </span>
-      <span
-        style={{
-          fontSize: 9.5,
-          fontWeight: 600,
-          color: 'rgba(255,255,255,0.38)',
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em',
-          textAlign: 'center',
-          lineHeight: 1.3,
-        }}
-      >
-        {label}
-      </span>
-    </div>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+      <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+      <path d="M10 9H8" />
+      <path d="M16 13H8" />
+      <path d="M16 17H8" />
+    </svg>
   )
 }
 
-function ChunkRow({ chunk }: { chunk: ChunkResult }) {
+// ── Chunk Card Sub-component ──────────────────────────────────────────────────
+
+function ChunkCard({ chunk }: { chunk: ChunkResult }) {
   const isMalicious = chunk.label === 'malicious'
-  const riskColor =
-    chunk.risk_level === 'high'
-      ? { bg: 'rgba(248,113,113,0.12)', border: 'rgba(248,113,113,0.18)', text: '#f87171' }
-      : chunk.risk_level === 'medium'
-      ? { bg: 'rgba(251,191,36,0.10)', border: 'rgba(251,191,36,0.15)', text: '#fbbf24' }
-      : { bg: 'rgba(52,211,153,0.10)', border: 'rgba(52,211,153,0.15)', text: '#34d399' }
 
   return (
-    <div
-      style={{
-        padding: '11px 14px',
-        borderBottom: '1px solid rgba(255,255,255,0.04)',
-        background: isMalicious ? 'rgba(248,113,113,0.025)' : 'transparent',
-      }}
-    >
-      {/* Header row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span
-          style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: 11,
-            color: 'rgba(251,191,36,0.65)',
-            minWidth: 58,
-          }}
-        >
-          {chunk.chunk_id}
-        </span>
-        <span className={`chunk-label ${isMalicious ? 'chunk-label--malicious' : 'chunk-label--safe'}`}>
-          {chunk.label}
-        </span>
-        <span
-          style={{
-            fontSize: 10,
-            fontWeight: 600,
-            padding: '2px 7px',
-            borderRadius: 5,
-            background: riskColor.bg,
-            border: `1px solid ${riskColor.border}`,
-            color: riskColor.text,
-            textTransform: 'capitalize',
-          }}
-        >
-          {chunk.risk_level} risk
+    <div className={`analysis-chunk-card ${isMalicious ? 'analysis-chunk-card--danger' : ''}`}>
+      <div className="analysis-chunk-card__header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontFamily: 'var(--font-assistant-mono, monospace)', fontSize: 11, color: '#71717a' }}>
+            {chunk.chunk_id}
+          </span>
+          <span className={`analysis-badge ${isMalicious ? 'analysis-badge--danger' : 'analysis-badge--safe'}`}>
+            {isMalicious ? 'Flagged' : 'Safe'}
+          </span>
+          <span className="analysis-badge analysis-badge--secondary" style={{ textTransform: 'capitalize' }}>
+            {chunk.risk_level} risk
+          </span>
+        </div>
+        <span style={{ fontSize: 10.5, color: '#71717a', fontFamily: 'var(--font-assistant-mono, monospace)' }}>
+          {Math.round(chunk.confidence * 100)}% confidence
         </span>
       </div>
 
-      {/* Only show reason + patterns for malicious chunks — keeps it concise */}
+      {/* Code excerpt preview */}
+      {chunk.excerpt ? (
+        <pre className="analysis-chunk-card__code">
+          {chunk.excerpt}
+        </pre>
+      ) : null}
+
+      {/* Reasoning and pattern tags for malicious chunks */}
       {isMalicious && (
-        <div style={{ marginTop: 8, paddingLeft: 66 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 2 }}>
           {chunk.reason && (
-            <p style={{ margin: '0 0 6px', fontSize: 11.5, color: 'rgba(255,255,255,0.58)', lineHeight: 1.6 }}>
+            <p style={{ margin: 0, fontSize: 11.5, color: '#fca5a5', lineHeight: 1.45 }}>
               {chunk.reason}
             </p>
           )}
@@ -167,131 +117,183 @@ function ChunkRow({ chunk }: { chunk: ChunkResult }) {
 // ── Main Panel ────────────────────────────────────────────────────────────────
 
 export function PromptAnalysisDetailsPanel({ details, isOpen, onClose }: Props) {
+  const [activeTab, setActiveTab] = useState<'overview' | 'chunks'>('overview')
+
   if (!details) return null
 
   const maliciousChunks = details.chunk_results.filter((c) => c.label === 'malicious')
   const safeChunks = details.chunk_results.filter((c) => c.label !== 'malicious')
   const isSafe = maliciousChunks.length === 0
   const fe = details.feature_evidence
-  const hasSignals = fe.role_override_count > 0 || fe.data_exfiltration_count > 0 || fe.top_terms.length > 0
+  const hasThreatSignals = fe.role_override_count > 0 || fe.data_exfiltration_count > 0 || maliciousChunks.length > 0
 
   return (
     <>
-      {/* Overlay */}
+      {/* Backdrop Overlay */}
       <div
         className={`analysis-drawer-overlay ${isOpen ? 'analysis-drawer-overlay--open' : ''}`}
         onClick={onClose}
+        aria-hidden="true"
       />
 
-      {/* Drawer */}
-      <div className={`analysis-drawer ${isOpen ? 'analysis-drawer--open' : ''}`}>
-        <div className="drawer-header">
-          <div>
-            <h3>Direct Prompt Analysis Report</h3>
-            <p className="drawer-subtitle">Direct prompt-injection analysis</p>
+      {/* Slide-in Sheet Drawer */}
+      <aside
+        className={`analysis-drawer ${isOpen ? 'analysis-drawer--open' : ''}`}
+        aria-label="Direct Prompt Analysis Report"
+        aria-modal="true"
+        role="dialog"
+      >
+        {/* Header */}
+        <header className="drawer-header">
+          <div className="drawer-header-left">
+            <div className="drawer-header-title-row">
+              <h3>Prompt Security Report</h3>
+              <span className="drawer-badge">Direct Prompt</span>
+            </div>
+            <p className="drawer-subtitle">Dual-layer AI prompt-injection verification</p>
           </div>
-          <button className="drawer-close-btn" type="button" onClick={onClose} aria-label="Close">
-            ✕
+          <button
+            className="drawer-close-btn"
+            type="button"
+            onClick={onClose}
+            aria-label="Close prompt analysis report"
+          >
+            <CloseIcon />
           </button>
-        </div>
+        </header>
 
+        {/* Content */}
         <div className="drawer-content">
 
-          {/* ── 1. VERDICT BANNER ─────────────────────────────────────── */}
-          <div className={`drawer-decision decision-compact ${isSafe ? 'drawer-decision--safe' : 'drawer-decision--blocked'}`}>
-            <div className="drawer-decision-label">
-              {isSafe ? <ShieldCheckIcon /> : <ShieldXIcon />}
-              <div>
-                <div>{isSafe ? 'Prompt Safe — Allowed' : 'Malicious Prompt — Blocked'}</div>
-                <div style={{ fontSize: 11, fontWeight: 400, opacity: 0.7, marginTop: 2 }}>
-                  {details.final_rationale}
-                </div>
+          {/* 1. HERO VERDICT ALERT BANNER */}
+          <div className={`analysis-verdict ${isSafe ? 'analysis-verdict--safe' : 'analysis-verdict--blocked'}`}>
+            <div className="analysis-verdict__icon-wrap">
+              {isSafe ? <ShieldCheckIcon /> : <ShieldAlertIcon />}
+            </div>
+            <div className="analysis-verdict__body">
+              <div className="analysis-verdict__header-line">
+                <span className="analysis-verdict__title">
+                  {isSafe ? 'Prompt Verified Safe — Allowed' : 'Security Threat Blocked'}
+                </span>
+                <span className={`analysis-badge ${isSafe ? 'analysis-badge--safe' : 'analysis-badge--danger'}`}>
+                  {isSafe ? 'CLEAN' : 'BLOCKED'}
+                </span>
               </div>
+              <p className="analysis-verdict__desc">
+                {isSafe
+                  ? details.final_rationale || 'No prompt injection, jailbreaks, or instruction overrides were detected in your input.'
+                  : details.final_rationale || 'This prompt was blocked because it contained instructions designed to override AI security boundaries.'}
+              </p>
             </div>
           </div>
 
-          <ScanSummarySection source="direct_prompt" details={details} />
-
-          {/* ── 2. THREAT SIGNALS ─────────────────────────────────────── */}
-          {!isSafe || hasSignals ? (
-            <div className="drawer-section">
-              <div className="drawer-section-header">
-                <AlertTriangleIcon />
-                What Was Flagged
-              </div>
-              <div className="drawer-section-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <CountBadge count={fe.role_override_count} label="Suspicious Instructions" danger />
-                  <CountBadge count={fe.data_exfiltration_count} label="Data Leak Attempts" danger />
-                  <CountBadge count={maliciousChunks.length} label="Flagged Sections" danger />
-                </div>
-
-                {fe.top_terms.length > 0 && (
-                  <div>
-                    <div style={{ fontSize: 10.5, fontWeight: 700, color: 'rgba(251,191,36,0.50)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                      Suspicious Terms Found
-                    </div>
-                    <div className="feature-tags">
-                      {fe.top_terms.map((term) => (
-                        <span key={term} className="feature-tag">
-                          {term}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            <p style={{ margin: 0, fontSize: 12.5, color: 'rgba(255,255,255,0.55)', lineHeight: 1.6, padding: '0 2px' }}>
-              No suspicious instructions, data-leak attempts, or flagged sections were found in this prompt.
-            </p>
-          )}
-
-          {/* ── 3. SECTIONS REVIEWED ─────────────────────────────────── */}
-          <div className="drawer-section">
-            <div className="drawer-section-header">
-              <ScanIcon />
-              Prompt Sections Reviewed
-              <span style={{ fontWeight: 400, color: 'rgba(255,255,255,0.38)', fontSize: 10, marginLeft: 4 }}>
-                ({details.chunk_results.length})
+          {/* 2. STATS OVERVIEW CARDS */}
+          <div className="analysis-stats-grid">
+            <div className="analysis-stat-card">
+              <span className="analysis-stat-card__label">Security Status</span>
+              <span className={`analysis-stat-card__val ${isSafe ? 'analysis-stat-card__val--safe' : 'analysis-stat-card__val--danger'}`}>
+                {isSafe ? 'Allowed' : 'Blocked'}
               </span>
+              <span className="analysis-stat-card__desc">Safety threshold met</span>
             </div>
-            <div className="drawer-section-body" style={{ padding: 0 }}>
-              {/* Safe / Flagged summary */}
-              <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                <div style={{ flex: 1, padding: '10px 14px', textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.05)' }}>
-                  <div style={{ fontSize: 18, fontWeight: 800, fontFamily: "'JetBrains Mono', monospace", color: '#34d399' }}>
-                    {safeChunks.length}
-                  </div>
-                  <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.38)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    Safe
-                  </div>
+
+            <div className="analysis-stat-card">
+              <span className="analysis-stat-card__label">Overrides</span>
+              <span className={`analysis-stat-card__val ${fe.role_override_count > 0 ? 'analysis-stat-card__val--danger' : ''}`}>
+                {fe.role_override_count === 0 ? '0 found' : `${fe.role_override_count} flagged`}
+              </span>
+              <span className="analysis-stat-card__desc">System prompt hijack</span>
+            </div>
+
+            <div className="analysis-stat-card">
+              <span className="analysis-stat-card__label">Data Leak Risk</span>
+              <span className={`analysis-stat-card__val ${fe.data_exfiltration_count > 0 ? 'analysis-stat-card__val--danger' : ''}`}>
+                {fe.data_exfiltration_count === 0 ? 'Clean' : `${fe.data_exfiltration_count} risk`}
+              </span>
+              <span className="analysis-stat-card__desc">Exfiltration patterns</span>
+            </div>
+          </div>
+
+          {/* 3. SEGMENTED NAVIGATION TABS */}
+          <div className="analysis-tabs" role="tablist">
+            <button
+              type="button"
+              className={`analysis-tab-btn ${activeTab === 'overview' ? 'analysis-tab-btn--active' : ''}`}
+              onClick={() => setActiveTab('overview')}
+              role="tab"
+              aria-selected={activeTab === 'overview'}
+            >
+              <FileTextIcon />
+              <span>Summary & Insights</span>
+            </button>
+            <button
+              type="button"
+              className={`analysis-tab-btn ${activeTab === 'chunks' ? 'analysis-tab-btn--active' : ''}`}
+              onClick={() => setActiveTab('chunks')}
+              role="tab"
+              aria-selected={activeTab === 'chunks'}
+            >
+              <LayersIcon />
+              <span>Inspected Blocks</span>
+              <span className="analysis-tab-count">{details.chunk_results.length}</span>
+            </button>
+          </div>
+
+          {/* TAB 1: OVERVIEW & AI SUMMARY */}
+          <div style={{ display: activeTab === 'overview' ? 'flex' : 'none', flexDirection: 'column', gap: 16 }}>
+            {/* Plain-English AI Explanation */}
+            <ScanSummarySection source="direct_prompt" details={details} />
+
+            {/* Threat Signals / Flagged Items (if any) */}
+            {hasThreatSignals && fe.top_terms.length > 0 && (
+              <div className="analysis-card">
+                <div className="analysis-card__header">
+                  <span style={{ fontSize: 11.5, fontWeight: 600, color: '#fde047', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Flagged Terms Found
+                  </span>
                 </div>
-                <div style={{ flex: 1, padding: '10px 14px', textAlign: 'center' }}>
-                  <div style={{ fontSize: 18, fontWeight: 800, fontFamily: "'JetBrains Mono', monospace", color: maliciousChunks.length > 0 ? '#f87171' : 'rgba(255,255,255,0.28)' }}>
-                    {maliciousChunks.length}
-                  </div>
-                  <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.38)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    Flagged
+                <div className="analysis-card__body">
+                  <div className="feature-tags">
+                    {fe.top_terms.map((term) => (
+                      <span key={term} className="feature-tag feature-tag--danger">
+                        {term}
+                      </span>
+                    ))}
                   </div>
                 </div>
               </div>
+            )}
+          </div>
 
-              {/* Chunk rows — malicious first */}
-              <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+          {/* TAB 2: TECHNICAL INSPECTION / BLOCKS */}
+          <div style={{ display: activeTab === 'chunks' ? 'flex' : 'none', flexDirection: 'column', gap: 16 }}>
+            <div className="analysis-card">
+              <div className="analysis-card__header">
+                <div className="analysis-card__header-left">
+                  <LayersIcon />
+                  <span>Prompt Text Chunks</span>
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <span className="analysis-badge analysis-badge--safe">{safeChunks.length} safe</span>
+                  {maliciousChunks.length > 0 && (
+                    <span className="analysis-badge analysis-badge--danger">{maliciousChunks.length} flagged</span>
+                  )}
+                </div>
+              </div>
+              <div className="analysis-card__body" style={{ gap: 8, maxHeight: 420, overflowY: 'auto' }}>
                 {maliciousChunks.map((chunk) => (
-                  <ChunkRow key={chunk.chunk_id} chunk={chunk} />
+                  <ChunkCard key={chunk.chunk_id} chunk={chunk} />
                 ))}
                 {safeChunks.map((chunk) => (
-                  <ChunkRow key={chunk.chunk_id} chunk={chunk} />
+                  <ChunkCard key={chunk.chunk_id} chunk={chunk} />
                 ))}
               </div>
             </div>
           </div>
 
         </div>
-      </div>
+      </aside>
     </>
   )
 }
+

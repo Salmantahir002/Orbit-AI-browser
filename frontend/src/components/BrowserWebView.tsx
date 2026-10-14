@@ -32,6 +32,7 @@ const HOMEPAGE_URL = 'about:blank'
 
 type HomePageProps = {
   onSearch: (query: string) => void
+  zoom?: number
 }
 
 function ArrowIcon() {
@@ -52,7 +53,7 @@ function SearchIcon() {
   )
 }
 
-function HomePage({ onSearch }: HomePageProps) {
+function HomePage({ onSearch, zoom = 100 }: HomePageProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [isSearchOpen, setIsSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -127,7 +128,7 @@ function HomePage({ onSearch }: HomePageProps) {
   }
 
   return (
-    <div className={`homepage-message ${isSearchOpen ? 'homepage-message--search-open' : ''}`}>
+    <div className={`homepage-message ${isSearchOpen ? 'homepage-message--search-open' : ''}`} style={{ zoom: zoom / 100 }}>
       <div className="homepage-content">
         <div className="homepage-hero">
           <div className="homepage-hero-icon-wrap">
@@ -211,6 +212,7 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
     const webviewInitialUrlRef = useRef(initialUrl)
     const [activeUrl, setActiveUrl] = useState(initialUrl)
     const [errorMessage, setErrorMessage] = useState('')
+    const [homepageZoom, setHomepageZoom] = useState(100)
     const isElectronRuntime = Boolean(window.electronAPI)
     const isHomePage = activeUrl === HOMEPAGE_URL && initialWebContentsId === undefined
 
@@ -220,6 +222,7 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
     // drawer/modal, or an inactive tab), we hide the guest by shrinking it to
     // zero size rather than trying to layer on top of it.
     const shouldShowGuest = isActive && !isHomePage && !errorMessage && !isObscured
+    const isActiveRef = useRef(isActive)
     const shouldShowGuestRef = useRef(shouldShowGuest)
     useEffect(() => {
       shouldShowGuestRef.current = shouldShowGuest
@@ -244,6 +247,18 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
       lastSentBoundsRef.current = key
       window.electronAPI.browser.setBounds(webContentsId, bounds)
     }, [])
+
+    useEffect(() => {
+      isActiveRef.current = isActive
+      if (!isActive || !isElectronRuntime) return
+      const activate = () => {
+        const id = webContentsIdRef.current
+        if (id !== null) window.electronAPI?.browser.setActiveTab(id)
+      }
+      activate()
+      const timer = window.setTimeout(activate, 200)
+      return () => window.clearTimeout(timer)
+    }, [isActive, isElectronRuntime])
 
     useImperativeHandle(ref, () => ({
       extractContent: async () => {
@@ -320,6 +335,8 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
             return
           }
           webContentsIdRef.current = result.webContentsId
+          setHomepageZoom(result.zoom)
+          if (isActiveRef.current) window.electronAPI?.browser.setActiveTab(result.webContentsId)
           containerRef.current?.setAttribute('data-webcontents-id', String(result.webContentsId))
           pushBounds()
         })
@@ -365,6 +382,9 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
         if (event.webContentsId !== webContentsIdRef.current) return
 
         switch (event.type) {
+          case 'zoom-changed':
+            if (typeof event.zoom === 'number') setHomepageZoom(event.zoom)
+            break
           case 'did-start-loading':
             onLoadingChange(tabId, true)
             break
@@ -402,7 +422,7 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
       return (
         <section className={`webview-stage ${isActive ? '' : 'webview-stage--inactive'}`} aria-hidden={!isActive} aria-label="Browser web view">
           <iframe className="browser-iframe" src={activeUrl} title="Browser preview" />
-          {isHomePage ? <HomePage onSearch={(query) => onSearch(tabId, query)} /> : null}
+          {isHomePage ? <HomePage zoom={homepageZoom} onSearch={(query) => onSearch(tabId, query)} /> : null}
           {!isHomePage ? <div className="webview-note">Electron webview activates inside desktop app.</div> : null}
         </section>
       )
@@ -413,7 +433,7 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
         {/* Empty on purpose: the actual page is a WebContentsView main composites
             over this rect (see pushBounds above), not a child of this DOM tree. */}
         <div ref={containerRef} className="browser-webview" />
-        {isHomePage ? <HomePage onSearch={(query) => onSearch(tabId, query)} /> : null}
+        {isHomePage ? <HomePage zoom={homepageZoom} onSearch={(query) => onSearch(tabId, query)} /> : null}
         {errorMessage ? <div className="webview-error" role="alert">{errorMessage}</div> : null}
       </section>
     )

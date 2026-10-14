@@ -16,6 +16,7 @@ import {
 } from './browserRuntime/index.js'
 
 import { providerSecureStore } from './providerSecureStore.js'
+import { BrowserUIController } from './browserUIController.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -25,11 +26,13 @@ if (isDevelopment) {
   process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true'
 }
 
-app.setPath('userData', path.join(app.getPath('appData'), 'prompt-defense-browser'))
+app.setPath('userData', process.env.ORBIT_USER_DATA_DIR || path.join(app.getPath('appData'), 'prompt-defense-browser'))
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
 app.commandLine.appendSwitch('disk-cache-size', '0')
 
-let mainWindow: BrowserWindow | null = null
+const browserWindows = new Map<number, BrowserWindow>()
+const tabOwners = new Map<number, BrowserWindow>()
+let browserUI: BrowserUIController
 const cdpSessionRegistry = new CdpSessionRegistry()
 const cdpInspectionService = new CdpInspectionService()
 // The runtime borrows the CDP collector as a sensor, but the agent's scan
@@ -39,6 +42,7 @@ const browserRuntime = new BrowserRuntime(
   // The agent can ask for an upload, but only the user can say which file.
   // A cancelled dialog is a refusal, and the planner never sees a path.
   async () => {
+    const mainWindow = BrowserWindow.getFocusedWindow() ?? browserWindows.values().next().value
     if (!mainWindow) return []
     const result = await dialog.showOpenDialog(mainWindow, {
       title: 'Choose files for the agent to upload',
@@ -59,23 +63,42 @@ const tabViews = new Map<number, WebContentsView>()
 // Blocks the user's own input on a tab while the agent drives it. Stop in the
 // shield's toast is forwarded to the renderer, which owns the running task.
 const agentInputShield = new AgentInputShield((tabId) => {
+  const mainWindow = tabOwners.get(tabId)
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('agent:stop-requested', tabId)
 })
 
+function requireShell(event: IpcMainInvokeEvent | IpcMainEvent): BrowserWindow | null {
+  const frame = event.senderFrame
+  if (!frame || frame.routingId !== event.sender.mainFrame.routingId || frame.processId !== event.sender.mainFrame.processId) return null
+  return browserWindows.get(event.sender.id) ?? null
+}
+
 function requireTabView(event: IpcMainInvokeEvent | IpcMainEvent, webContentsId: unknown): WebContentsView | null {
-  if (!mainWindow || event.sender.id !== mainWindow.webContents.id || !Number.isInteger(webContentsId)) {
+  const mainWindow = requireShell(event)
+  if (!mainWindow || !Number.isInteger(webContentsId) || tabOwners.get(webContentsId as number) !== mainWindow) {
     return null
   }
   return tabViews.get(webContentsId as number) ?? null
 }
 
 function sendTabEvent(webContentsId: number, payload: Record<string, unknown>) {
+  const mainWindow = tabOwners.get(webContentsId)
   mainWindow?.webContents.send('browser:tab-event', { webContentsId, ...payload })
 }
 
 /** Wires a freshly created guest view into the same sensors a `<webview>` used to attach on `did-attach-webview`. */
-function attachGuestBehaviour(view: WebContentsView) {
+function attachGuestBehaviour(view: WebContentsView, mainWindow: BrowserWindow) {
   const contents = view.webContents
+  browserUI.attachShortcuts(contents, mainWindow)
+  browserUI.initializePageZoom(contents)
+  let lastVisitId: string | null = null
+  let lastVisitUrl: string | null = null
+  const recordVisit = (url: string) => { lastVisitId = browserUI.profile.recordVisit(url, contents.getTitle()); lastVisitUrl = url }
+  contents.on('did-navigate', (_event, url, _status, _description) => { browserUI.applyPageZoom(contents); recordVisit(url) })
+  // SPAs (GitHub, YouTube, …) call history.replaceState/pushState repeatedly while loading,
+  // each firing did-navigate-in-page with the same URL; only a changed URL is a new visit.
+  contents.on('did-navigate-in-page', (_event, url, isMainFrame) => { if (isMainFrame && url !== lastVisitUrl) recordVisit(url) })
+  contents.on('page-title-updated', (_event, title) => browserUI.profile.updateVisit(lastVisitId, title))
   contents.setWindowOpenHandler(({ url, disposition, referrer, postBody }) => {
     if (!mainWindow || mainWindow.isDestroyed()) return { action: 'deny' }
     const hostWindow = mainWindow
@@ -103,9 +126,12 @@ function attachGuestBehaviour(view: WebContentsView) {
         popupView.setBounds({ x: 0, y: 0, width: 0, height: 0 })
         const popupId = popupView.webContents.id
         tabViews.set(popupId, popupView)
-        attachGuestBehaviour(popupView)
+        tabOwners.set(popupId, hostWindow)
+        attachGuestBehaviour(popupView, hostWindow)
+        browserUI.raise(hostWindow)
         popupView.webContents.once('destroyed', () => {
           if (!tabViews.delete(popupId)) return
+          tabOwners.delete(popupId)
           if (!hostWindow.isDestroyed()) {
             hostWindow.contentView.removeChildView(popupView)
             hostWindow.webContents.send('browser:popup-closed', popupId)
@@ -127,7 +153,7 @@ function attachGuestBehaviour(view: WebContentsView) {
   })
   // Electron's guest content has no native context menu of its own; this is
   // what supplies the Chrome-equivalent Back/Reload/Inspect/Console menu.
-  attachWebviewContextMenu(contents, mainWindow as BrowserWindow)
+  attachWebviewContextMenu(contents, mainWindow, (url) => browserUI.requestSaveAs(contents, url))
 
   // One CDP session per guest, shared by the manual scanner and the agent
   // runtime. Electron permits only a single debugger attachment per
@@ -147,7 +173,7 @@ function attachGuestBehaviour(view: WebContentsView) {
   contents.on('did-stop-loading', () => sendTabEvent(id, { type: 'did-stop-loading' }))
   contents.on('did-finish-load', () => sendTabEvent(id, { type: 'did-finish-load' }))
   contents.on('did-navigate', (_event, url) => sendTabEvent(id, { type: 'did-navigate', url }))
-  contents.on('did-navigate-in-page', (_event, url) => sendTabEvent(id, { type: 'did-navigate-in-page', url }))
+  contents.on('did-navigate-in-page', (_event, url, isMainFrame) => { if (isMainFrame) sendTabEvent(id, { type: 'did-navigate-in-page', url }) })
   contents.on('page-favicon-updated', (_event, favicons) => {
     if (favicons && favicons.length > 0) {
       sendTabEvent(id, { type: 'page-favicon-updated', favicon: favicons[0] })
@@ -162,14 +188,14 @@ function attachGuestBehaviour(view: WebContentsView) {
   })
 }
 
-async function createWindow() {
-  mainWindow = new BrowserWindow({
+async function createWindow(startInBrowser = false) {
+  const mainWindow = new BrowserWindow({
     width: 1366,
     height: 768,
     minWidth: 960,
     minHeight: 620,
     backgroundColor: '#050706',
-    title: 'Prompt Defense',
+    title: 'Orbit',
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
@@ -180,26 +206,28 @@ async function createWindow() {
       webSecurity: true,
     },
   })
-
+  const shellId = mainWindow.webContents.id
+  browserWindows.set(shellId, mainWindow)
   applyElectronSecurityConfig(session.defaultSession, mainWindow, isDevelopment)
-  // Every download prompts for a location, matching the "Save Image As" /
-  // "Save Link As" behaviour the webview context menu below triggers.
-  session.defaultSession.on('will-download', (_event, item) => {
-    const savePath = mainWindow
-      ? dialog.showSaveDialogSync(mainWindow, { defaultPath: item.getFilename() })
-      : dialog.showSaveDialogSync({ defaultPath: item.getFilename() })
-    if (savePath) {
-      item.setSavePath(savePath)
-    } else {
-      item.cancel()
+  const releaseTabs = () => {
+    for (const [id, owner] of tabOwners) {
+      if (owner !== mainWindow) continue
+      agentInputShield.unlock(id)
+      const view = tabViews.get(id)
+      tabViews.delete(id)
+      tabOwners.delete(id)
+      if (view) {
+        if (!mainWindow.isDestroyed()) mainWindow.contentView.removeChildView(view)
+        if (!view.webContents.isDestroyed()) view.webContents.close()
+      }
     }
-  })
+  }
   // A reloaded or crashed shell has lost the task that would unlock its tabs.
   mainWindow.webContents.on('did-start-navigation', (details) => {
-    if (details.isMainFrame && !details.isSameDocument) agentInputShield.unlockAll()
+    if (details.isMainFrame && !details.isSameDocument) releaseTabs()
   })
-  mainWindow.webContents.on('render-process-gone', () => agentInputShield.unlockAll())
-  mainWindow.on('closed', () => agentInputShield.unlockAll())
+  mainWindow.webContents.on('render-process-gone', releaseTabs)
+  mainWindow.on('closed', () => { releaseTabs(); browserWindows.delete(shellId) })
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedUrl) => {
     console.error(`[renderer-load-failed] ${errorCode} ${errorDescription} ${validatedUrl}`)
   })
@@ -208,20 +236,17 @@ async function createWindow() {
     mainWindow?.show()
   })
 
-  if (isDevelopment) {
-    await mainWindow.loadURL('http://localhost:5173').catch((err) => {
-      console.warn(`[electron-main] loadURL failed: ${err}`)
-    })
-    return
-  }
-
-  await mainWindow.loadFile(path.join(__dirname, '../dist/index.html')).catch((err) => {
-    console.error(`[electron-main] loadFile failed: ${err}`)
-  })
+  // Start the shell first; registering the overlay synchronously before this promise settles
+  // makes its IPC available to React, while its renderer loads after the welcome frame.
+  const shellLoaded = (isDevelopment
+    ? mainWindow.loadURL(`http://localhost:5173${startInBrowser ? '?start=browser' : ''}`)
+    : mainWindow.loadFile(path.join(__dirname, '../dist/index.html'), { query: startInBrowser ? { start: 'browser' } : {} }))
+    .catch((err) => console.error(`[electron-main] Shell load failed: ${err}`))
+  await browserUI.attach(mainWindow, shellLoaded)
 }
 
 ipcMain.handle('security:scan-webview', (event, webContentsId: unknown) => {
-  if (!mainWindow || event.sender.id !== mainWindow.webContents.id || !Number.isInteger(webContentsId)) {
+  if (!requireTabView(event, webContentsId)) {
     return null
   }
 
@@ -231,7 +256,8 @@ ipcMain.handle('security:scan-webview', (event, webContentsId: unknown) => {
 // Browser tab hosting: the renderer owns tab UI/state, main owns the actual
 // guest content as a WebContentsView positioned over an empty React container.
 ipcMain.handle('browser:create-tab', (event, url: unknown) => {
-  if (!mainWindow || event.sender.id !== mainWindow.webContents.id || typeof url !== 'string') {
+  const mainWindow = requireShell(event)
+  if (!mainWindow || typeof url !== 'string') {
     return null
   }
 
@@ -240,7 +266,9 @@ ipcMain.handle('browser:create-tab', (event, url: unknown) => {
   view.setBounds({ x: 0, y: 0, width: 0, height: 0 }) // invisible until the renderer reports real bounds
   const viewId = view.webContents.id
   tabViews.set(viewId, view)
-  attachGuestBehaviour(view)
+  tabOwners.set(viewId, mainWindow)
+  attachGuestBehaviour(view, mainWindow)
+  browserUI.raise(mainWindow)
   view.webContents.loadURL(url).catch((err) => {
     // close-tab drops the view from tabViews first, so a tab closed before its first load settled
     // is an aborted load, not a failure.
@@ -248,15 +276,17 @@ ipcMain.handle('browser:create-tab', (event, url: unknown) => {
     console.warn('[main] Initial tab loadURL failed:', err)
   })
 
-  return { webContentsId: viewId }
+  return { webContentsId: viewId, zoom: browserUI.getPageZoom(view.webContents) }
 })
 
 ipcMain.handle('browser:close-tab', (event, webContentsId: unknown) => {
+  const mainWindow = requireShell(event)
   const view = requireTabView(event, webContentsId)
   if (!view || !mainWindow) return
   agentInputShield.unlock(webContentsId as number)
   mainWindow.contentView.removeChildView(view)
   tabViews.delete(webContentsId as number)
+  tabOwners.delete(webContentsId as number)
   if (!view.webContents.isDestroyed()) view.webContents.close()
 })
 
@@ -297,13 +327,17 @@ ipcMain.handle('browser:stop', (event, webContentsId: unknown) => {
   requireTabView(event, webContentsId)?.webContents.stop()
 })
 
+ipcMain.on('browser:set-active-tab', (event, webContentsId: unknown) => {
+  if (requireTabView(event, webContentsId)) browserUI.setActiveTarget(requireShell(event)!, webContentsId as number)
+})
+
 
 // setBounds fires on every resize/tab-switch — a fire-and-forget `send`
 // avoids an IPC round trip on that hot path.
 ipcMain.on('browser:set-bounds', (event, webContentsId: unknown, bounds: unknown) => {
   const view = requireTabView(event, webContentsId)
   const rect = bounds as { x: number; y: number; width: number; height: number } | null
-  if (!view || !rect) return
+  if (!view || !rect || ![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)) return
   view.setBounds({
     x: Math.round(rect.x),
     y: Math.round(rect.y),
@@ -311,22 +345,25 @@ ipcMain.on('browser:set-bounds', (event, webContentsId: unknown, bounds: unknown
     height: Math.max(0, Math.round(rect.height)),
   })
   agentInputShield.syncBounds(webContentsId as number, view.getBounds())
+  if (rect.width > 0 && rect.height > 0) browserUI.setActiveTarget(requireShell(event)!, webContentsId as number)
 })
 
 // Agent mode locks the tab it drives against the user's own mouse and keyboard
 // for the duration of a task (see agentInputShield.ts).
 ipcMain.handle('browser:set-agent-lock', (event, webContentsId: unknown, locked: unknown) => {
+  const mainWindow = requireShell(event)
   const view = requireTabView(event, webContentsId)
   if (!view || !mainWindow || typeof locked !== 'boolean') return false
   if (locked) agentInputShield.lock(webContentsId as number, view, mainWindow)
   else agentInputShield.unlock(webContentsId as number)
+  browserUI.raise(mainWindow)
   return true
 })
 
 // Sole entry point for agent-driven browser actions. The manual scan channel
 // above is deliberately separate and is never used by the agent runtime.
 ipcMain.handle(RUNTIME_INVOKE_CHANNEL, (event, payload: unknown): Promise<RuntimeResult<unknown>> | RuntimeResult<unknown> => {
-  if (!mainWindow || event.sender.id !== mainWindow.webContents.id) {
+  if (!requireShell(event)) {
     return { ok: false, error: { code: 'INVALID_ARGUMENT', message: 'Runtime commands may only originate from the app shell' } }
   }
 
@@ -334,6 +371,8 @@ ipcMain.handle(RUNTIME_INVOKE_CHANNEL, (event, payload: unknown): Promise<Runtim
   if (!request) {
     return { ok: false, error: { code: 'INVALID_ARGUMENT', message: 'Malformed browser runtime request' } }
   }
+
+  if (!requireTabView(event, request.targetId)) return { ok: false, error: { code: 'INVALID_ARGUMENT', message: 'This target belongs to another browser window' } }
 
   return browserRuntime.invoke(request.targetId, request.name, request.params as never)
 })
@@ -369,6 +408,14 @@ ipcMain.handle('providers:get-active', () => {
 })
 
 app.whenReady().then(async () => {
+  browserUI = new BrowserUIController({
+    createWindow: () => createWindow(true),
+    getTarget: (window, id) => tabOwners.get(id) === window ? tabViews.get(id) ?? null : null,
+    loadOverlay: async (contents) => {
+      if (isDevelopment) await contents.loadURL('http://localhost:5173?surface=browser-overlay')
+      else await contents.loadFile(path.join(__dirname, '../dist/index.html'), { query: { surface: 'browser-overlay' } })
+    },
+  })
   // Packaged / e2e runs have no concurrently wrapper — bring the backend up here. The window
   // does not wait for it: nothing on the welcome screen needs the backend, and every
   // backend-dependent action already fails closed with a "not reachable" error until it is up.
