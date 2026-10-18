@@ -37,11 +37,16 @@ const PAGE_FREEZE_HOLD_MS = 400
 
 type FrozenPage = { image: string; luminance: number }
 
-function waitForMinimumScanDuration(startedAt: number) {
+function waitForMinimumScanDuration(startedAt: number, signal: AbortSignal) {
   const remainingTime = MINIMUM_WEBPAGE_SCAN_DURATION_MS - (performance.now() - startedAt)
-  return remainingTime > 0
-    ? new Promise<void>((resolve) => window.setTimeout(resolve, remainingTime))
-    : Promise.resolve()
+  if (remainingTime <= 0) return Promise.resolve()
+  return new Promise<void>((resolve, reject) => {
+    const timer = window.setTimeout(resolve, remainingTime)
+    signal.addEventListener('abort', () => {
+      window.clearTimeout(timer)
+      reject(signal.reason)
+    }, { once: true })
+  })
 }
 
 type BrowserTab = {
@@ -195,6 +200,7 @@ export function BrowserShell() {
   const [webpageScanResult, setWebpageScanResult] = useState<SecurityCheckResponse | null>(null)
   const [webpageScanContent, setWebpageScanContent] = useState<WebpageContent | null>(null)
   const [isScanningPage, setIsScanningPage] = useState(false)
+  const scanAbortControllerRef = useRef<AbortController | null>(null)
   // While a report drawer is open the guest view is hidden (a native view would
   // cover the drawer). A frame of the page, taken just before, stands in its
   // place, so the drawer's glass slides in over the page, not an empty window.
@@ -569,6 +575,10 @@ export function BrowserShell() {
   const handleScanPage = useCallback(async () => {
     if (isScanningPage) return
 
+    const controller = new AbortController()
+    scanAbortControllerRef.current = controller
+    const { signal } = controller
+
     setIsScanningPage(true)
     const scanStartedAt = performance.now()
     try {
@@ -580,20 +590,30 @@ export function BrowserShell() {
         return
       }
 
+      // Bail out immediately if the panel was closed during extraction.
+      if (signal.aborted) return
+
       setWebpageScanContent(content)
       setWebpageScanResult(null)
       setPromptDrawerOpen(false)
       setWebpageDrawerOpen(true)
 
-      const result = await checkWebpage(content)
-      await waitForMinimumScanDuration(scanStartedAt)
+      const result = await checkWebpage(content, signal)
+      await waitForMinimumScanDuration(scanStartedAt, signal)
       setWebpageScanResult(result)
 
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        // User closed the panel — silently discard the in-flight scan.
+        return
+      }
       console.error('[ScanPage] Failed:', error)
       setWebpageDrawerOpen(false)
     } finally {
       setIsScanningPage(false)
+      if (scanAbortControllerRef.current === controller) {
+        scanAbortControllerRef.current = null
+      }
     }
   }, [activeTabId, freezeActivePage, isScanningPage])
 
@@ -624,6 +644,12 @@ export function BrowserShell() {
   }, [])
 
   const handleCloseWebpageDrawer = useCallback(() => {
+    // Abort any scan that is still running so it doesn't continue in the background.
+    if (scanAbortControllerRef.current) {
+      scanAbortControllerRef.current.abort()
+      scanAbortControllerRef.current = null
+    }
+    setIsScanningPage(false)
     setWebpageDrawerOpen(false)
   }, [])
 

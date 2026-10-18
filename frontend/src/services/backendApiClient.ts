@@ -11,7 +11,7 @@ import type { AnalysisDetails } from '../types/analysisDetailsTypes'
 
 const API_BASE_URL = 'http://127.0.0.1:8000/api/v1'
 
-async function requestJson<TResponse>(path: string, init?: RequestInit): Promise<TResponse> {
+async function requestJson<TResponse>(path: string, init?: RequestInit, signal?: AbortSignal): Promise<TResponse> {
   let response: Response
 
   try {
@@ -21,8 +21,10 @@ async function requestJson<TResponse>(path: string, init?: RequestInit): Promise
         ...init?.headers,
       },
       ...init,
+      signal,
     })
   } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw err
     throw new Error(
       `Backend is not reachable (${err instanceof Error ? err.message : 'connection refused'}). Start Electron with npm run electron:start or run backend on port 8000.`,
       { cause: err },
@@ -52,11 +54,11 @@ export function checkPrompt(prompt: string): Promise<SecurityCheckResponse> {
   })
 }
 
-export function checkWebpage(content: WebpageContent): Promise<SecurityCheckResponse> {
+export function checkWebpage(content: WebpageContent, signal?: AbortSignal): Promise<SecurityCheckResponse> {
   return requestJson<SecurityCheckResponse>('/security/check-webpage', {
     method: 'POST',
     body: JSON.stringify(content),
-  })
+  }, signal)
 }
 
 /** Sends a finished scan's output to the active provider for a plain-language summary. */
