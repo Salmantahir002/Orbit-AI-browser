@@ -1,4 +1,7 @@
 export { BrowserRuntime } from './browserRuntime.js'
+export type { BrowserRuntimeOptions, DownloadedFile } from './browserRuntime.js'
+export { FileChooserInterceptor, describeFileInput } from './fileChooser.js'
+export type { FileChooserRequest } from './fileChooser.js'
 export { CdpSession, CdpSessionRegistry } from './cdpSession.js'
 export type { CdpEventListener, CdpParams } from './cdpSession.js'
 export { capturePageScreenshot, fetchAccessibilityTree } from './pageInspector.js'
@@ -46,6 +49,7 @@ export type {
   PageStateSnapshot,
   SemanticDialog,
   SemanticElement,
+  SessionDownload,
   ValidationIssue,
   RuntimeCommandName,
   RuntimeCommandResult,

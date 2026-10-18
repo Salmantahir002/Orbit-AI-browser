@@ -21,6 +21,8 @@ export class BrowserUIController {
   readonly profile = new BrowserProfileStore()
   private readonly surfaces = new Map<number, WindowSurface>()
   private readonly liveDownloads = new Map<string, DownloadItem>()
+  /** Downloads started since launch. The profile also holds earlier sessions' history. */
+  private readonly sessionDownloadIds = new Set<string>()
   private readonly saveAsRequests = new Set<string>()
   private readonly siteZoom = new Map<string, number>()
   private readonly homeZoom = new Map<number, number>()
@@ -264,6 +266,7 @@ export class BrowserUIController {
     this.profile.downloads.unshift(entry)
     this.profile.downloads = this.profile.downloads.filter((record, index) => index < 500 || this.liveDownloads.has(record.id))
     this.liveDownloads.set(entry.id, item)
+    this.sessionDownloadIds.add(entry.id)
     let lastUpdate = Date.now()
     let lastBytes = 0
     const update = (force = false) => {
@@ -282,6 +285,16 @@ export class BrowserUIController {
     item.once('done', (_event, state) => { update(true); entry.state = state; entry.paused = false; entry.canResume = false; entry.bytesPerSecond = 0; this.liveDownloads.delete(entry.id); this.profile.changed() })
     this.profile.changed()
     if (owner && !owner.state) this.show(owner, 'downloads')
+  }
+
+  /**
+   * Downloads that finished during this run of the app and whose file is still
+   * on disk, newest first. These, and only these, are what agent mode may
+   * attach to a page without the user picking the file themselves.
+   */
+  sessionDownloads(): DownloadEntry[] {
+    return this.profile.downloads.filter((entry) =>
+      this.sessionDownloadIds.has(entry.id) && entry.state === 'completed' && existsSync(entry.savePath))
   }
 
   requestSaveAs(contents: WebContents, url: string): void {

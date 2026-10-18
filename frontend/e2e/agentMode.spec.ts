@@ -373,6 +373,26 @@ test.describe('Browser Runtime over real CDP', () => {
     expect(await pageValue(targetId, 'document.querySelectorAll(".chip").length')).toBe(0)
   })
 
+  test('clearing a field never selects the text of the browser window itself', async () => {
+    const targetId = await loadTestPage(COMPOSE_PAGE)
+    const subject = await composeElement(targetId, 'Subject')
+    // The user has just clicked in the app (an approval's Allow button), so
+    // the shell, not the page, holds keyboard focus while the agent works.
+    await app.evaluate(({ BrowserWindow }) => {
+      const shellWindow = BrowserWindow.getAllWindows().find((candidate) => candidate.webContents.getURL().includes('index.html') || candidate.webContents.getURL().startsWith('http://localhost'))
+      ;(shellWindow ?? BrowserWindow.getAllWindows()[0]!).webContents.focus()
+    })
+    await window.evaluate(() => window.getSelection()?.removeAllRanges())
+
+    for (const value of ['Draft subject', 'Application for One Day Leave']) {
+      const filled = await invoke<FillResult>(targetId, 'fill', { elementId: subject, value })
+      expect(filled.ok).toBe(true)
+    }
+
+    expect(await pageValue(targetId, 'document.getElementById("subject").value')).toBe('Application for One Day Leave')
+    expect(await window.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('')
+  })
+
   test('fill keeps the focus a click-to-edit proxy hands to its real field', async () => {
     const targetId = await loadTestPage(COMPOSE_PAGE)
     const proxy = await composeElement(targetId, 'Add a note')

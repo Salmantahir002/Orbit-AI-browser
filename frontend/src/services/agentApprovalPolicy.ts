@@ -83,6 +83,42 @@ function describeElement(element: SemanticElement | undefined, fallback: string)
   return `${element.role} "${element.name}"`
 }
 
+function uploadApproval(
+  toolCall: AgentToolCall,
+  pageState: PageStateSnapshot | null,
+  target: SemanticElement | undefined,
+): ApprovalRequest {
+  const field = describeElement(target, 'a file field')
+  const downloadId = toolCall.arguments?.download
+  if (downloadId === undefined) {
+    return {
+      toolCall,
+      summary: `Attach files to ${field}`,
+      reason: 'You will choose the files yourself; the agent cannot pick them.',
+      risk: 'upload',
+    }
+  }
+
+  // The agent picked this file, so the dialog must say exactly which one and
+  // where it is going: this is the user's only chance to stop it.
+  const file = pageState?.downloads?.find((download) => download.id === downloadId)
+  const site = pageState?.url ? hostOf(pageState.url) : ''
+  return {
+    toolCall,
+    summary: `Attach "${file?.filename ?? 'a downloaded file'}" to ${field}${site ? ` on ${site}` : ''}`,
+    reason: 'The agent chose this file from your Downloads in this session. Approve only if you want it sent to this site.',
+    risk: 'upload',
+  }
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host
+  } catch {
+    return ''
+  }
+}
+
 /**
  * Returns an approval request when consent is required, or null to proceed.
  * Applies risk-weighted confidence thresholds: high-impact tools demand higher certainty,
@@ -98,12 +134,7 @@ export function approvalFor(
     : undefined
 
   if (toolCall.requires_approval || toolCall.tool === 'upload') {
-    return {
-      toolCall,
-      summary: `Attach files to ${describeElement(target, 'a file field')}`,
-      reason: 'You will choose the files yourself; the agent cannot pick them.',
-      risk: 'upload',
-    }
+    return uploadApproval(toolCall, pageState, target)
   }
 
   // Only actions that actually commit something are worth interrupting for.

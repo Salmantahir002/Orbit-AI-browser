@@ -37,11 +37,11 @@ const cdpSessionRegistry = new CdpSessionRegistry()
 const cdpInspectionService = new CdpInspectionService()
 // The runtime borrows the CDP collector as a sensor, but the agent's scan
 // travels its own IPC channel, its own backend endpoint, and its own event log.
-const browserRuntime = new BrowserRuntime(
-  (targetId) => cdpInspectionService.capture(targetId),
+const browserRuntime = new BrowserRuntime({
+  deepContentProvider: (targetId) => cdpInspectionService.capture(targetId),
   // The agent can ask for an upload, but only the user can say which file.
   // A cancelled dialog is a refusal, and the planner never sees a path.
-  async () => {
+  filePickerProvider: async () => {
     const mainWindow = BrowserWindow.getFocusedWindow() ?? browserWindows.values().next().value
     if (!mainWindow) return []
     const result = await dialog.showOpenDialog(mainWindow, {
@@ -52,7 +52,15 @@ const browserRuntime = new BrowserRuntime(
 
     return result.canceled ? [] : result.filePaths
   },
-)
+  // The one exception: a file this browser downloaded earlier in the session
+  // (the Downloads panel), offered to the planner by id only. The approval
+  // policy still names the file to the user before it is attached.
+  downloadsProvider: () => browserUI.sessionDownloads().map((entry) => ({
+    filename: entry.filename,
+    sizeBytes: entry.receivedBytes || entry.totalBytes,
+    path: entry.savePath,
+  })),
+})
 
 // Guest pages are hosted as main-owned WebContentsViews, keyed by their own
 // webContents id (the same id every other channel — CDP, the scan IPC, the
@@ -430,13 +438,19 @@ ipcMain.on('browser:set-bounds', (event, webContentsId: unknown, bounds: unknown
 
 // Agent mode locks the tab it drives against the user's own mouse and keyboard
 // for the duration of a task (see agentInputShield.ts).
-ipcMain.handle('browser:set-agent-lock', (event, webContentsId: unknown, locked: unknown) => {
+ipcMain.handle('browser:set-agent-lock', async (event, webContentsId: unknown, locked: unknown) => {
   const mainWindow = requireShell(event)
   const view = requireTabView(event, webContentsId)
   if (!view || !mainWindow || typeof locked !== 'boolean') return false
   if (locked) agentInputShield.lock(webContentsId as number, view, mainWindow)
   else agentInputShield.unlock(webContentsId as number)
   browserUI.raise(mainWindow)
+  // The same span the user is locked out is the span the agent owns the
+  // page's file choosers: an "Attach" click must not open an OS dialog the
+  // agent cannot operate. Failure only means the dialog may appear.
+  await browserRuntime.interceptFileChoosers(webContentsId as number, locked).catch((error) => {
+    console.warn(`[browser-runtime] File chooser interception ${locked ? 'on' : 'off'} failed:`, error)
+  })
   return true
 })
 

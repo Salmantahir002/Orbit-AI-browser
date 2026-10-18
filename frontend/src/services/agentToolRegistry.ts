@@ -12,8 +12,8 @@ import type { AgentToolCall, ResolvedToolCommand } from '../types/agentTypes'
  * Tools that resolve to `null` are handled by the agent loop rather than the
  * browser: `open_tab` re-points the loop at a new target, `extract` writes to
  * working memory, and `finish` ends the task. `upload` does reach the
- * browser — the runtime shows the user a native file picker and never lets
- * the planner name a path.
+ * browser, but the planner never names a path: it names one of this session's
+ * downloads by id, or the runtime shows the user a native file picker.
  */
 
 function asString(value: unknown): string {
@@ -55,7 +55,13 @@ export function resolveToolCall(call: AgentToolCall): ResolvedToolCommand {
     case 'wait':
       return { command: 'waitForDomStable', params: { timeoutMs: asNumber(args.timeoutMs) } }
     case 'upload':
-      return { command: 'upload', params: { elementId: asString(args.target) } }
+      return {
+        command: 'upload',
+        params: {
+          elementId: asString(args.target),
+          downloadId: args.download === undefined ? undefined : asString(args.download),
+        },
+      }
     // `open_tab` is loop-handled: the tab strip is renderer state, so the agent
     // loop creates the tab and re-points itself at it rather than sending a
     // command to the Browser Runtime, which only ever drives one existing tab.

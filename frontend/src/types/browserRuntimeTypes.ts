@@ -111,7 +111,14 @@ export type PageStateSnapshot = {
   validationErrors: ValidationIssue[]
   selectedElementIds: string[]
   truncated: boolean
+  /** Completed downloads from this session that `upload` may attach by id. */
+  downloads?: SessionDownload[]
+  /** Set while the page waits for files, e.g. after its "Attach" button was clicked. */
+  fileChooser?: { multiple: boolean } | null
 }
+
+/** A file downloaded earlier in this session, addressed by an id valid until the next state extraction. */
+export type SessionDownload = { id: string; filename: string; sizeBytes: number }
 
 /** Deep content capture consumed only by the agent's security scan. */
 export type AgentSecuritySnapshot = {
@@ -139,12 +146,11 @@ export type TypeParams = { text: string; delayMs?: number }
 export type PressKeyParams = { key: string; modifiers?: number }
 export type ScrollParams = { deltaX?: number; deltaY?: number; elementId?: string }
 /**
- * Note there is no `filePaths`. The planner names the *field*, never the file.
- * The paths come from a native OS picker the user drives, so a hostile page
- * cannot cause a specific file to be uploaded even if it fully controls the
- * planner's output.
+ * Note there is no `filePaths`: the planner never names a path. It names one
+ * of this session's downloads by id, or the user picks the files in a native
+ * OS dialog. `elementId` is the file input or the control that opens it.
  */
-export type UploadParams = { elementId: string }
+export type UploadParams = { elementId: string; downloadId?: string }
 export type WaitParams = { timeoutMs?: number; quietPeriodMs?: number }
 export type ScreenshotParams = { fullPage?: boolean }
 /** Toggles the cosmetic agent overlay (virtual cursor + breathing glow). */

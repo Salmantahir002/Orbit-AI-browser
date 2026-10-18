@@ -44,6 +44,14 @@ export const AgentValidationIssueSchema = Type.Object({
   message: Type.Optional(Type.String()),
 })
 
+// A file the browser downloaded earlier in this session. The planner sees an
+// id, a name and a size; the path stays in the Electron main process.
+export const AgentSessionDownloadSchema = Type.Object({
+  id: Type.String(),
+  filename: Type.String(),
+  sizeBytes: Type.Optional(Type.Number()),
+})
+
 // The compact semantic state. The raw accessibility tree never arrives here.
 export const AgentPageStateSchema = Type.Object({
   url: Type.Optional(Type.String()),
@@ -54,6 +62,9 @@ export const AgentPageStateSchema = Type.Object({
   validationErrors: Type.Optional(Type.Array(AgentValidationIssueSchema)),
   selectedElementIds: Type.Optional(Type.Array(Type.String())),
   truncated: Type.Optional(Type.Boolean()),
+  downloads: Type.Optional(Type.Array(AgentSessionDownloadSchema)),
+  // Set while the page waits for files (its "Attach" control was clicked).
+  fileChooser: Type.Optional(Type.Union([Type.Object({ multiple: Type.Boolean() }), Type.Null()])),
 })
 
 export const AgentStepRecordSchema = Type.Object({

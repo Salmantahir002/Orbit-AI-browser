@@ -9,7 +9,7 @@ const MAX_TEXT_ARGUMENT_LENGTH = 5_000
 
 export class ToolValidationError extends Error {}
 
-export type ToolParameterKind = 'string' | 'number' | 'element_id' | 'url'
+export type ToolParameterKind = 'string' | 'number' | 'element_id' | 'download_id' | 'url'
 
 export interface ToolParameter {
   name: string
@@ -141,8 +141,15 @@ const TOOL_SPECS: readonly ToolSpec[] = [
   }),
   spec({
     name: 'upload',
-    description: 'Attach files to a file input. Always asks the user to choose the files.',
-    parameters: [param('target', 'element_id', true, 'Element id of the file input')],
+    description:
+      'Attach a file to the page. target is the file input or the control that opens it ' +
+      '(e.g. an Attach files / paperclip / Upload button) — upload clicks it and answers the ' +
+      'file dialog itself, so never click it first. Pass download=<id> to attach a file listed ' +
+      'under DOWNLOADS (downloaded earlier in this session); without download the user picks the files.',
+    parameters: [
+      param('target', 'element_id', true, 'Element id of the file input or its attach button'),
+      param('download', 'download_id', false, 'Download id from DOWNLOADS, e.g. d1'),
+    ],
     category: 'files',
     requiresApproval: true,
   }),
@@ -255,6 +262,19 @@ function validateUrl(name: string, value: unknown): string {
   return url
 }
 
+function validateDownloadId(name: string, value: unknown, knownDownloadIds?: readonly string[]): string {
+  const downloadId = validateString(name, value)
+  // The id is the planner's only handle on a file. An invented one must never
+  // be resolved to whatever happens to occupy that slot.
+  if (knownDownloadIds !== undefined && !knownDownloadIds.includes(downloadId)) {
+    throw new ToolValidationError(
+      `Argument '${name}' references unknown download '${downloadId}'. ` +
+        'Only files listed under DOWNLOADS in the current page state may be attached.',
+    )
+  }
+  return downloadId
+}
+
 function validateElementId(name: string, value: unknown, knownElementIds?: readonly string[]): string {
   const elementId = validateString(name, value)
   // A planner that invents an element id is hallucinating, and acting on a
@@ -283,11 +303,13 @@ const ARGUMENT_FALLBACKS: Record<string, Record<string, string>> = {
 
 /**
  * Validate a raw planner tool call. Returns [toolName, cleanedArguments].
- * Unknown arguments are rejected rather than dropped.
+ * Unknown arguments are rejected rather than dropped. Ids are only checked
+ * against a list when one is given.
  */
 export function validateToolCall(
   payload: unknown,
   knownElementIds?: readonly string[],
+  knownDownloadIds?: readonly string[],
 ): [string, Record<string, unknown>] {
   if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
     throw new ToolValidationError('Planner output must be a JSON object.')
@@ -333,6 +355,7 @@ export function validateToolCall(
     if (p.kind === 'number') cleaned[p.name] = validateNumber(p.name, value)
     else if (p.kind === 'url') cleaned[p.name] = validateUrl(p.name, value)
     else if (p.kind === 'element_id') cleaned[p.name] = validateElementId(p.name, value, knownElementIds)
+    else if (p.kind === 'download_id') cleaned[p.name] = validateDownloadId(p.name, value, knownDownloadIds)
     else cleaned[p.name] = validateString(p.name, value)
   }
 
@@ -358,6 +381,7 @@ const ELEMENT_DEPENDENT = new Set(['click', 'fill', 'upload', 'scroll', 'evaluat
 export function validateToolQueue(
   payloads: unknown,
   knownElementIds?: readonly string[],
+  knownDownloadIds?: readonly string[],
 ): Array<[string, Record<string, unknown>]> {
   if (!Array.isArray(payloads) || payloads.length === 0) {
     throw new ToolValidationError('Planner must return at least one tool call.')
@@ -370,7 +394,7 @@ export function validateToolQueue(
   let navigated = false
 
   for (let index = 0; index < payloads.length; index++) {
-    const [toolName, args] = validateToolCall(payloads[index], knownElementIds)
+    const [toolName, args] = validateToolCall(payloads[index], knownElementIds, knownDownloadIds)
 
     if (index > 0 && ['evaluate', 'element_bounds', 'dispatch_mouse_event', 'drag', 'extract_virtual_table'].includes(validated[index - 1]![0])) {
       throw new ToolValidationError('Observe the previous tool result before planning dependent actions.')

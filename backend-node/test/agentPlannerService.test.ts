@@ -152,6 +152,43 @@ describe('prompt shape', () => {
   })
 })
 
+describe('attaching downloaded files', () => {
+  const stateWithDownloads = (): AgentPageState => ({
+    ...sampleState(),
+    downloads: [{ id: 'd1', filename: 'Leave application.pdf', sizeBytes: 28_262 }],
+    fileChooser: { multiple: false },
+  })
+
+  it('lists the session downloads and an open file chooser in the page state', () => {
+    const userPrompt = agentPlannerService.buildMessages('x', { goal: 'x' }, stateWithDownloads())[1]!.content
+    expect(userPrompt).toContain('DOWNLOADS')
+    expect(userPrompt).toContain('d1 "Leave application.pdf" 27.6 KB')
+    expect(userPrompt).toContain('FILE CHOOSER OPEN: the page is waiting for one file')
+  })
+
+  it('omits both sections when there is nothing to attach', () => {
+    const userPrompt = agentPlannerService.buildMessages('x', { goal: 'x' }, sampleState())[1]!.content
+    expect(userPrompt).not.toContain('DOWNLOADS (')
+    expect(userPrompt).not.toContain('FILE CHOOSER OPEN')
+  })
+
+  it('accepts an upload of a listed download and rejects an invented one', () => {
+    const [actions] = agentPlannerService.parsePlan(
+      '{"tool": "upload", "arguments": {"target": "e1", "download": "d1"}}', KNOWN_IDS, ['d1'],
+    )
+    expect(actions).toEqual([['upload', { target: 'e1', download: 'd1' }]])
+    expect(() =>
+      agentPlannerService.parsePlan('{"tool": "upload", "arguments": {"target": "e1", "download": "d3"}}', KNOWN_IDS, ['d1']),
+    ).toThrow(/unknown download 'd3'/)
+  })
+
+  it('tells the planner to let upload open the file dialog itself', () => {
+    const systemPrompt = agentPlannerService.buildMessages('x', { goal: 'x' }, sampleState())[0]!.content
+    expect(systemPrompt).toContain('Attaching a file: call upload')
+    expect(systemPrompt).toContain('download=<id>')
+  })
+})
+
 describe('session memory', () => {
   it('parses the progress checklist, normalising statuses', () => {
     const [, , , , progress] = agentPlannerService.parsePlan(

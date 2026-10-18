@@ -1,6 +1,7 @@
 import { evaluatePage, elementBounds, dispatchMouse, drag, extractVirtualTable, type EvaluateParams, type BoundsParams, type MouseParams, type DragParams, type VirtualTableParams } from './advancedBrowser.js'
 import type { CdpSession } from './cdpSession.js'
 import { focusElement, resolveElementPoint, readViewportSize } from './elementResolver.js'
+import { describeFileInput, FileChooserInterceptor, type FileChooserRequest } from './fileChooser.js'
 import {
   fieldHoldsText,
   hasRecipient,
@@ -52,6 +53,7 @@ import {
   type ScreenshotResult,
   type OverlayParams,
   type ScrollParams,
+  type SessionDownload,
   type TargetDescriptor,
   type TypeParams,
   type UploadParams,
@@ -115,8 +117,7 @@ function landedIn(focused: FocusedField, expected: string): FieldEntry {
  *  - Native input and bounded guest-page evaluation share this gateway.
  *
  * Phases 1–3 implement the lifecycle, the inspection layer, and the action
- * layer. File upload is deliberately withheld until the Phase 7 approval
- * workflow exists.
+ * layer. File upload runs only behind the Phase 7 approval workflow.
  */
 /**
  * Supplies the deep page capture the agent's security scan consumes. Injected
@@ -131,6 +132,24 @@ export type DeepContentProvider = (targetId: number) => Promise<Record<string, u
  */
 export type FilePickerProvider = () => Promise<string[]>
 
+/** A completed download the runtime may attach. `path` never leaves the main process. */
+export type DownloadedFile = { filename: string; sizeBytes: number; path: string }
+
+/**
+ * Lists the files this browser downloaded during the current session, newest
+ * first, whose file is still on disk.
+ */
+export type DownloadsProvider = () => DownloadedFile[]
+
+export type BrowserRuntimeOptions = {
+  deepContentProvider?: DeepContentProvider
+  filePickerProvider?: FilePickerProvider
+  downloadsProvider?: DownloadsProvider
+}
+
+/** Enough for "the file I just downloaded" without flooding the planner prompt. */
+const MAX_PLANNER_DOWNLOADS = 10
+
 const SNAPSHOT_FIELDS: readonly (keyof AgentSecuritySnapshot)[] = [
   'visible_text', 'hidden_text', 'html_comments', 'meta_tags', 'input_values', 'aria_text',
   'iframe_content', 'shadow_dom_content', 'inline_javascript', 'external_javascript', 'css_content',
@@ -141,12 +160,19 @@ export class BrowserRuntime {
   private readonly targets = new Map<number, CdpSession>()
   /** Latest element id → node binding per target, refreshed by extractPageState. */
   private readonly elementHandles = new Map<number, Map<string, ElementHandle>>()
+  /** Latest download id → file binding per target, refreshed by extractPageState. */
+  private readonly downloadHandles = new Map<number, Map<string, DownloadedFile>>()
+  private readonly fileChoosers = new FileChooserInterceptor()
+  private readonly deepContentProvider?: DeepContentProvider
+  private readonly filePickerProvider?: FilePickerProvider
+  private readonly downloadsProvider?: DownloadsProvider
   private actionCounter = 0
 
-  constructor(
-    private readonly deepContentProvider?: DeepContentProvider,
-    private readonly filePickerProvider?: FilePickerProvider,
-  ) {}
+  constructor(options: BrowserRuntimeOptions = {}) {
+    this.deepContentProvider = options.deepContentProvider
+    this.filePickerProvider = options.filePickerProvider
+    this.downloadsProvider = options.downloadsProvider
+  }
 
   /**
    * Marks a guest webview as drivable by the agent. Only registered targets
@@ -155,6 +181,7 @@ export class BrowserRuntime {
    */
   registerTarget(session: CdpSession): void {
     this.targets.set(session.targetId, session)
+    this.fileChoosers.observe(session)
     void session.enableDomains(AGENT_CDP_DOMAINS).catch((error) => {
       console.warn(`[browser-runtime] Domain setup failed for target ${session.targetId}:`, error)
     })
@@ -163,6 +190,19 @@ export class BrowserRuntime {
   unregisterTarget(targetId: number): void {
     this.targets.delete(targetId)
     this.elementHandles.delete(targetId)
+    this.downloadHandles.delete(targetId)
+    this.fileChoosers.forget(targetId)
+  }
+
+  /**
+   * Called while the agent holds a tab: file choosers the page opens are
+   * intercepted instead of showing the OS dialog, which the agent cannot
+   * operate (see fileChooser.ts). Resolves quietly for an unknown target.
+   */
+  async interceptFileChoosers(targetId: number, enabled: boolean): Promise<void> {
+    const session = this.targets.get(targetId)
+    if (!session?.isAlive()) return
+    await this.fileChoosers.hold(session, enabled)
   }
 
   isRegistered(targetId: number): boolean {
@@ -298,7 +338,43 @@ export class BrowserRuntime {
     })
 
     this.elementHandles.set(session.targetId, new Map(handles.map((handle) => [handle.elementId, handle])))
-    return state
+    const chooser = await this.fileChoosers.pendingRequest(session)
+    return {
+      ...state,
+      downloads: this.bindDownloads(session.targetId),
+      fileChooser: chooser ? { multiple: chooser.multiple } : null,
+    }
+  }
+
+  /**
+   * Gives this session's downloads short ids (`d1`, `d2`, …) for the planner,
+   * the same way elements get `e1`, `e2`. Like element ids, they are only
+   * valid until the next extraction.
+   */
+  private bindDownloads(targetId: number): SessionDownload[] {
+    const files = (this.downloadsProvider?.() ?? []).slice(0, MAX_PLANNER_DOWNLOADS)
+    const bound = new Map(files.map((file, index) => [`d${index + 1}`, file]))
+    this.downloadHandles.set(targetId, bound)
+    return [...bound].map(([id, file]) => ({ id, filename: file.filename, sizeBytes: file.sizeBytes }))
+  }
+
+  private requireDownload(session: CdpSession, downloadId: unknown): DownloadedFile {
+    if (typeof downloadId !== 'string' || !downloadId) {
+      throw new BrowserRuntimeError('INVALID_ARGUMENT', 'A download id is required')
+    }
+
+    const file = this.downloadHandles.get(session.targetId)?.get(downloadId)
+    // Re-checked against the live list: the file may have been removed from
+    // the downloads panel or deleted from disk since the state was read.
+    const stillAvailable = file && (this.downloadsProvider?.() ?? []).some((candidate) => candidate.path === file.path)
+    if (!file || !stillAvailable) {
+      throw new BrowserRuntimeError(
+        'ELEMENT_NOT_FOUND',
+        `Download ${downloadId} is unknown or no longer available; extract page state again`,
+      )
+    }
+
+    return file
   }
 
   private captureScreenshot(session: CdpSession, params: ScreenshotParams): Promise<ScreenshotResult> {
@@ -701,26 +777,30 @@ export class BrowserRuntime {
    *
    * `DOM.setFileInputFiles` can hand any readable file on the machine to a
    * remote site, which is exactly what an indirect prompt injection would aim
-   * for. The defence is structural rather than a permission prompt: the file
-   * paths are never supplied by the planner. They come from a native OS picker
-   * the user operates, so the worst a fully compromised planner can do is ask
-   * for a file dialog the user can cancel.
+   * for. The defence is structural: the planner never supplies a path. It
+   * either names one of this session's downloads by id, or the user picks the
+   * files in a native OS dialog. Either way the approval policy has already
+   * asked the user before this runs, so the worst a fully compromised planner
+   * can do is propose attaching a file this browser itself just downloaded.
    */
   private async upload(session: CdpSession, params: UploadParams): Promise<ActionAck> {
     const handle = this.requireHandle(session, params.elementId)
-    if (!this.filePickerProvider) {
+    // Resolved before anything is clicked, so a bad id has no side effects.
+    const download = params.downloadId === undefined ? undefined : this.requireDownload(session, params.downloadId)
+    const pickFiles = this.filePickerProvider
+    if (!download && !pickFiles) {
       throw new BrowserRuntimeError('APPROVAL_REQUIRED', 'No file picker is available to confirm this upload')
     }
-    if (typeof handle.backendNodeId !== 'number') {
-      throw new BrowserRuntimeError('ELEMENT_NOT_INTERACTABLE', `Element ${handle.elementId} is not a file input`)
-    }
 
-    const files = await this.filePickerProvider()
+    const chooser = await this.resolveFileChooser(session, handle)
+    const files = download ? [download.path] : await pickFiles!()
     if (!files.length) {
       throw new BrowserRuntimeError('APPROVAL_REQUIRED', 'The upload was cancelled; no files were selected')
     }
+    const attached = chooser.multiple ? files : files.slice(0, 1)
 
-    await session.send('DOM.setFileInputFiles', { files, backendNodeId: handle.backendNodeId })
+    await session.send('DOM.setFileInputFiles', { files: attached, backendNodeId: chooser.backendNodeId })
+    this.fileChoosers.settle(session.targetId)
     await settleAfterAction(session)
 
     return this.ack({
@@ -731,8 +811,40 @@ export class BrowserRuntime {
       valueChanged: true,
       checkedChanged: false,
       expectation: 'none',
-      reason: `Attached ${files.length} file(s) chosen by the user`,
+      reason: download
+        ? `Attached "${download.filename}" from this session's downloads`
+        : `Attached ${attached.length} file(s) chosen by the user`,
     })
+  }
+
+  /**
+   * Finds the file input that will receive the files: the target itself, the
+   * chooser an earlier click already opened, or the one the target opens when
+   * clicked now — sites usually hide the input behind an "Attach" button.
+   */
+  private async resolveFileChooser(session: CdpSession, handle: ElementHandle): Promise<FileChooserRequest> {
+    if (typeof handle.backendNodeId === 'number') {
+      const input = await describeFileInput(session, handle.backendNodeId)
+      if (input) return input
+    }
+
+    const pending = await this.fileChoosers.pendingRequest(session)
+    if (pending) return pending
+
+    const point = await resolveElementPoint(session, handle)
+    await moveVirtualCursor(session, point, handle.name || 'upload')
+    const opened = await this.fileChoosers.capture(session, async () => {
+      await pulseVirtualCursorClick(session, point)
+      await dispatchNativeClick(session, point)
+    })
+    if (!opened) {
+      throw new BrowserRuntimeError(
+        'ELEMENT_NOT_INTERACTABLE',
+        `Element ${handle.elementId} ("${handle.name}") did not open a file chooser; target the file input or its attach button`,
+      )
+    }
+
+    return opened
   }
 
   private async waitForNavigation(session: CdpSession, params: WaitParams): Promise<ActionAck> {

@@ -96,3 +96,40 @@ it('the catalogue documents every registered tool', () => {
     expect(catalogue).toContain(`- ${name}:`)
   }
 })
+
+describe('upload from this session\'s downloads', () => {
+  const KNOWN_DOWNLOADS = ['d1', 'd2']
+
+  it('accepts a listed download id', () => {
+    const [tool, args] = validateToolCall({ tool: 'upload', arguments: { target: 'e1', download: 'd2' } }, KNOWN_IDS, KNOWN_DOWNLOADS)
+    expect(tool).toBe('upload')
+    expect(args).toEqual({ target: 'e1', download: 'd2' })
+  })
+
+  it('still accepts an upload where the user picks the file', () => {
+    const [, args] = validateToolCall({ tool: 'upload', arguments: { target: 'e1' } }, KNOWN_IDS, KNOWN_DOWNLOADS)
+    expect(args).toEqual({ target: 'e1' })
+  })
+
+  it('rejects a download id that is not in the page state', () => {
+    expect(() =>
+      validateToolCall({ tool: 'upload', arguments: { target: 'e1', download: 'd9' } }, KNOWN_IDS, KNOWN_DOWNLOADS),
+    ).toThrow(/unknown download 'd9'/)
+  })
+
+  it('rejects any download id when the session has no downloads', () => {
+    expect(() =>
+      validateToolCall({ tool: 'upload', arguments: { target: 'e1', download: 'd1' } }, KNOWN_IDS, []),
+    ).toThrow(/unknown download 'd1'/)
+  })
+
+  it('rejects a file path smuggled in as the download id', () => {
+    expect(() =>
+      validateToolCall({ tool: 'upload', arguments: { target: 'e1', download: 'C:\Users\me\secrets.txt' } }, KNOWN_IDS, KNOWN_DOWNLOADS),
+    ).toThrow(ToolValidationError)
+  })
+
+  it('documents the download argument in the tool catalogue', () => {
+    expect(renderToolCatalogue()).toContain('"download": <download_id?>')
+  })
+})

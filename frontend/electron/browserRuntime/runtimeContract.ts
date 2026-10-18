@@ -148,7 +148,21 @@ export type PageStateSnapshot = {
   selectedElementIds: string[]
   /** True when the element list hit its cap and was cut short. */
   truncated: boolean
+  /**
+   * Completed downloads from this browsing session, newest first, which
+   * `upload` may attach by id. Supplied by the runtime, not the State Builder.
+   */
+  downloads?: SessionDownload[]
+  /** Set while the page waits for files, e.g. after its "Attach" button was clicked. */
+  fileChooser?: { multiple: boolean } | null
 }
+
+/**
+ * A file this browser downloaded earlier in the session, as the planner sees
+ * it: an id (`d1`, `d2`, …) that is only valid until the next
+ * `extractPageState`, a name and a size. Never its path.
+ */
+export type SessionDownload = { id: string; filename: string; sizeBytes: number }
 
 /**
  * Runtime-internal binding from a planner-visible element id back to the
@@ -194,12 +208,17 @@ export type TypeParams = { text: string; delayMs?: number }
 export type PressKeyParams = { key: string; modifiers?: number }
 export type ScrollParams = { deltaX?: number; deltaY?: number; elementId?: string }
 /**
- * Note there is no `filePaths`. The planner names the *field*, never the file.
- * The paths come from a native OS picker the user drives, so a hostile page
- * cannot cause a specific file to be uploaded even if it fully controls the
- * planner's output.
+ * Note there is no `filePaths`: the planner never names a path. Either it
+ * names one of this session's downloads by id (`downloadId`), or the user
+ * picks the files in a native OS dialog. A hostile page that fully controls
+ * the planner can therefore reach nothing on disk except files the browser
+ * itself downloaded this session, and the approval policy shows the user
+ * that file's name before anything is attached.
+ *
+ * `elementId` is the file input itself or the control that opens it (an
+ * "Attach" button driving a hidden input).
  */
-export type UploadParams = { elementId: string }
+export type UploadParams = { elementId: string; downloadId?: string }
 export type WaitParams = { timeoutMs?: number; quietPeriodMs?: number }
 export type ScreenshotParams = { fullPage?: boolean }
 /**

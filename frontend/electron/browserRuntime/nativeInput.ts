@@ -1,6 +1,7 @@
 import type { CdpSession } from './cdpSession.js'
 import type { ViewportPoint } from './elementResolver.js'
 import { BrowserRuntimeError } from './runtimeContract.js'
+import { selectFocusedFieldContents } from './fieldProbe.js'
 
 /**
  * Native input dispatch over `Input.dispatchMouseEvent` and
@@ -189,10 +190,21 @@ export async function dispatchNativeScroll(
   })
 }
 
-/** Selects the whole field and deletes it, without touching `.value`. */
+/**
+ * Selects the whole field and deletes it, without touching `.value`.
+ *
+ * The selection is made in the page rather than with Ctrl+A. A key event the
+ * page leaves unhandled bubbles up to the window's Edit > Select All
+ * accelerator, which selected all of the browser's own UI whenever the app
+ * window held focus. Ctrl+A is kept only for fields page script cannot reach
+ * (cross-origin frames). The delete is still a real key press, so editors and
+ * frameworks see ordinary input events.
+ */
 export async function clearFocusedField(session: CdpSession): Promise<void> {
-  const selectAllModifier = process.platform === 'darwin' ? MODIFIER.meta : MODIFIER.ctrl
-  await dispatchNativeKeyPress(session, 'a', selectAllModifier)
+  if (!(await selectFocusedFieldContents(session))) {
+    const selectAllModifier = process.platform === 'darwin' ? MODIFIER.meta : MODIFIER.ctrl
+    await dispatchNativeKeyPress(session, 'a', selectAllModifier)
+  }
   await dispatchNativeKeyPress(session, 'Backspace')
   await dispatchNativeKeyPress(session, 'Delete')
 }

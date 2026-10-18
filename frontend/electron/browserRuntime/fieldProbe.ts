@@ -87,6 +87,38 @@ const PROBE_FUNCTION = `function (normalisedTypes) {
 }`
 
 /**
+ * Selects everything in the focused text field, following focus through open
+ * shadow roots and same-origin frames. Only the selection changes; the value
+ * is left for native key events to delete. Returns false when no text field is
+ * reachable (nothing focused, or focus inside a cross-origin frame).
+ */
+const SELECT_FOCUSED_FUNCTION = `function () {
+  let el = document.activeElement;
+  for (let hops = 0; el && hops < 25; hops += 1) {
+    if (el.shadowRoot && el.shadowRoot.activeElement) { el = el.shadowRoot.activeElement; continue; }
+    if (el.tagName === 'IFRAME' || el.tagName === 'FRAME') {
+      let inner = null;
+      try { inner = el.contentDocument; } catch (error) { inner = null; }
+      if (!inner) return false;
+      el = inner.activeElement;
+      continue;
+    }
+    break;
+  }
+  if (!el) return false;
+
+  const textInput = el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' &&
+    !/^(button|submit|reset|checkbox|radio|file|image|hidden)$/i.test(el.type || ''));
+  if (textInput) { el.select(); return true; }
+  if (el.isContentEditable !== true) return false;
+
+  let root = el;
+  while (root.parentElement && root.parentElement.isContentEditable) root = root.parentElement;
+  el.ownerDocument.getSelection().selectAllChildren(root);
+  return true;
+}`
+
+/**
  * Reads a recipient field: the raw text still in its input, and every address
  * already shown around it as a chip. The chip area is the largest ancestor of
  * the input that contains no other visible text field — so the To row, never
@@ -242,6 +274,19 @@ export async function probeFocusedField(session: CdpSession, handle?: ElementHan
     return asProbeResult(await callOnTarget(session, anchor, PROBE_FUNCTION, [NORMALISED_INPUT_TYPES])) ?? unknown
   } catch {
     return unknown
+  }
+}
+
+/** Selects the focused field's whole content in the page. See SELECT_FOCUSED_FUNCTION. */
+export async function selectFocusedFieldContents(session: CdpSession): Promise<boolean> {
+  try {
+    const response = await session.send('Runtime.evaluate', {
+      expression: `(${SELECT_FOCUSED_FUNCTION})()`,
+      returnByValue: true,
+    })
+    return (response.result as { value?: unknown } | undefined)?.value === true
+  } catch {
+    return false
   }
 }
 

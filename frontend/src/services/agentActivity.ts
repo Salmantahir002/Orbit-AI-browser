@@ -23,7 +23,8 @@ export function describeAgentActivity(call: AgentToolCall): string {
     extract_virtual_table: 'Collecting table rows and checking for duplicates',
     click: 'Selecting a page control', fill: 'Filling in a field', type: 'Entering text',
     press_key: 'Pressing a key', navigate: 'Opening the requested page', open_tab: 'Opening a new tab',
-    scroll: 'Scrolling the page', upload: 'Attaching the selected files', wait: 'Waiting for the page to settle',
+    scroll: 'Scrolling the page', wait: 'Waiting for the page to settle',
+    upload: args.download === undefined ? 'Attaching the files you choose' : 'Attaching a file from your downloads',
     extract: 'Recording the findings', finish: 'Preparing the result',
   }
   return labels[call.tool]
