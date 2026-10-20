@@ -1,8 +1,11 @@
+import { useLiveTranscription } from './useLiveTranscription'
+import { MicrophoneButton, MicrophoneStatus } from './MicrophoneButton'
 import {
   useEffect,
   useState,
   useRef,
   useCallback,
+  useId,
   type FormEvent,
   type KeyboardEvent,
   type ReactNode,
@@ -10,6 +13,7 @@ import {
 } from 'react'
 import { LiquidGlass } from './LiquidGlass'
 import { PromptModelPicker } from './PromptModelPicker'
+import { PromptExpandButton } from './PromptExpandButton'
 
 import { getModelCapabilities } from '../utils/modelCapabilities'
 import { getAllStoredProviders } from '../services/providerApiClient'
@@ -116,6 +120,9 @@ export function PromptInputBox({
   onOpenSettings,
 }: PromptInputBoxProps) {
   const [prompt, setPrompt] = useState('')
+  const [isExpanded, setIsExpanded] = useState(false)
+  const promptId = useId()
+  const voice = useLiveTranscription(prompt, setPrompt, clearSignal)
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const [isAttachMenuOpen, setIsAttachMenuOpen] = useState(false)
   const [incompatibilityWarning, setIncompatibilityWarning] = useState<string | null>(null)
@@ -205,7 +212,7 @@ export function PromptInputBox({
     const trimmedPrompt = prompt.trim()
 
     // Must have prompt or attachments
-    if ((!trimmedPrompt && attachments.length === 0) || disabled) {
+    if ((!trimmedPrompt && attachments.length === 0) || disabled || voice.busy) {
       return
     }
 
@@ -340,10 +347,19 @@ export function PromptInputBox({
     setAttachments((prev) => prev.filter((a) => a.id !== id))
   }
 
-  const canSubmit = !disabled && (Boolean(prompt.trim()) || attachments.length > 0)
+  const canSubmit = !disabled && !voice.busy && (Boolean(prompt.trim()) || attachments.length > 0)
 
   return (
-    <form className="prompt-form lg-host" onSubmit={handleSubmit}>
+    <form
+      className={`prompt-form lg-host${isExpanded ? ' prompt-composer--expanded' : ''}`}
+      onSubmit={handleSubmit}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && isExpanded && !event.defaultPrevented) {
+          event.preventDefault()
+          setIsExpanded(false)
+        }
+      }}
+    >
       <LiquidGlass refraction={96} bezel={22} blur={6} elasticity={0.14} />
       {/* Hidden file inputs */}
       <input
@@ -361,7 +377,10 @@ export function PromptInputBox({
         onChange={handleDocFileChange}
       />
 
-      {contextBadge ? <div className="prompt-context-container">{contextBadge}</div> : null}
+      <div className="prompt-composer-header">
+        {contextBadge ? <div className="prompt-context-container">{contextBadge}</div> : null}
+        <PromptExpandButton expanded={isExpanded} controls={promptId} onToggle={() => setIsExpanded((value) => !value)} />
+      </div>
 
       {/* Error banner when an incompatible attachment is inserted */}
       {incompatibilityWarning && (
@@ -426,9 +445,12 @@ export function PromptInputBox({
       )}
 
       <textarea
+        id={promptId}
         ref={textareaRef}
         className="prompt-textarea"
         disabled={disabled}
+        readOnly={voice.busy}
+        aria-label="Chat prompt"
         placeholder={placeholder || 'Write a message or attach files...'}
         rows={1}
         value={prompt}
@@ -438,6 +460,7 @@ export function PromptInputBox({
 
       <div className="prompt-form-footer">
         <div className="prompt-form-actions">
+          <MicrophoneButton state={voice.state} disabled={disabled} onClick={() => { void voice.toggle() }} />
           {/* File & Image Attachment Button (Chat mode only) */}
           <div className="prompt-attachment-picker-wrapper" ref={attachMenuRef}>
             <button
@@ -502,6 +525,7 @@ export function PromptInputBox({
           <SendIcon />
         </button>
       </div>
+      <MicrophoneStatus state={voice.state} error={voice.error} />
     </form>
   )
 }

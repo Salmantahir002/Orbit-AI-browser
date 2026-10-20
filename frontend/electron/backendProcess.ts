@@ -28,7 +28,6 @@ const HEALTH_TIMEOUT_MS = 15_000
 const HEALTH_POLL_INTERVAL_MS = 500
 
 let child: ChildProcess | null = null
-let stopping = false
 
 /** Resolves the compiled backend entrypoint for dev-unpackaged vs installed layouts. */
 function resolveBackendEntry(): string {
@@ -68,7 +67,7 @@ export async function startBackend(): Promise<void> {
   const entry = resolveBackendEntry()
   console.log(`[backend] starting ${entry}`)
 
-  child = spawn(process.execPath, [entry], {
+  const spawned = spawn(process.execPath, [entry], {
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
@@ -77,21 +76,23 @@ export async function startBackend(): Promise<void> {
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
+  child = spawned
 
-  child.stdout?.on('data', (buf: Buffer) => process.stdout.write(`[backend] ${buf}`))
-  child.stderr?.on('data', (buf: Buffer) => process.stderr.write(`[backend] ${buf}`))
+  spawned.stdout?.on('data', (buf: Buffer) => process.stdout.write(`[backend] ${buf}`))
+  spawned.stderr?.on('data', (buf: Buffer) => process.stderr.write(`[backend] ${buf}`))
 
   // Without a listener a failed spawn (e.g. the entry file is missing) is an unhandled 'error'
   // event, which takes the whole main process down instead of degrading to "backend not reachable".
-  child.on('error', (error) => {
+  spawned.on('error', (error) => {
     console.warn('[backend] failed to start:', error)
-    child = null
+    if (child === spawned) child = null
   })
 
-  child.on('exit', (code, signal) => {
-    if (!stopping) {
-      console.warn(`[backend] exited unexpectedly (code=${code ?? 'null'}, signal=${signal ?? 'null'})`)
-    }
+  // stopBackend lets go of the process before killing it, so a process still held here exited on
+  // its own. Comparing identities also keeps a late exit from clearing a backend started since.
+  spawned.on('exit', (code, signal) => {
+    if (child !== spawned) return
+    console.warn(`[backend] exited unexpectedly (code=${code ?? 'null'}, signal=${signal ?? 'null'})`)
     child = null
   })
 
@@ -99,12 +100,19 @@ export async function startBackend(): Promise<void> {
   console.log(healthy ? '[backend] healthy' : '[backend] did not become healthy in time — continuing anyway')
 }
 
-/** Stops the backend on app shutdown. Safe to call more than once. */
-export function stopBackend(): void {
-  stopping = true
-  if (child && !child.killed) {
-    console.log('[backend] stopping')
-    child.kill()
-  }
+/**
+ * Stops the backend on app shutdown. Safe to call more than once. The promise settles once the
+ * process has exited (or after `timeoutMs`), which an update install waits for: the installer
+ * replaces Orbit.exe and the backend's native modules, and Windows cannot replace a file in use.
+ */
+export function stopBackend(timeoutMs = 3_000): Promise<void> {
+  const running = child
   child = null
+  if (!running || running.exitCode !== null || running.signalCode !== null) return Promise.resolve()
+  console.log('[backend] stopping')
+  return new Promise((resolve) => {
+    const timeout = setTimeout(resolve, timeoutMs)
+    running.once('exit', () => { clearTimeout(timeout); resolve() })
+    running.kill()
+  })
 }

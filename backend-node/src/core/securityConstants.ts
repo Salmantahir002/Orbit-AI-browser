@@ -84,3 +84,25 @@ export const ALL_INDICATORS: Record<string, string[]> = {
   system_prompt_reveal: SYSTEM_PROMPT_REVEAL,
   data_exfiltration: DATA_EXFILTRATION,
 }
+
+/**
+ * Corroboration cue for webpage passages that only the DL model flagged.
+ *
+ * Prompt Guard scores ordinary imperative marketing copy ("Never start a
+ * document from scratch", "Stay in control of access to your documents") at
+ * 0.98+, the same as a real attack, so its score alone cannot separate the two.
+ * An indirect injection has to do one of these things to work: address the AI,
+ * talk about its instructions/rules, target the user or their data, or ask for
+ * secrecy. Deliberately much broader than ALL_INDICATORS — this is not a
+ * detector, it only decides whether a model-only hit is credible.
+ */
+export const AI_DIRECTED_CUE_PATTERN = new RegExp([
+  // Addresses an AI.
+  String.raw`\b(ai|a\.i\.|assistants?|chatbots?|bots?|llms?|language models?|models?|agents?|gpt|chatgpt|claude|gemini|copilot)\b`,
+  // Talks about the AI's instructions, rules or persona.
+  String.raw`\b(instructions?|prompts?|guidelines?|guidance|rules|polic(y|ies)|directives?|system|ignore|disregard|forget|override|bypass|restrictions?|jailbreak|developer mode|pretend|role-?play|act as|you are now|from now on|previous|prior|above|earlier)\b`,
+  // Targets the user or their data.
+  String.raw`\b(the user|users?'s?|credentials?|passwords?|cookies?|tokens?|api[ -]?keys?|secrets?|exfiltrat\w*|confidential)\b|https?:\/\/`,
+  // Asks for secrecy.
+  String.raw`\b(do not|don't|never) (tell|show|reveal|mention|inform)\b|\bsecretly\b|\bwithout (telling|asking|confirmation|notifying)\b`,
+].join('|'), 'i')

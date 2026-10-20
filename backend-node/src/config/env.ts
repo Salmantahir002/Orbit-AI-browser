@@ -1,6 +1,12 @@
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { config as loadDotenv } from 'dotenv'
 
 loadDotenv()
+
+// The backend package: backend-node/ in the repo, resources/backend/ in the installed app. This file
+// is <root>/src/config/env.ts, or <root>/dist/config/env.js once compiled.
+const BACKEND_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 function parseCorsOrigins(raw: string | undefined): string[] {
   const value = raw ?? 'http://localhost:5173'
@@ -39,7 +45,10 @@ export const settings: Settings = {
   // to match the existing frontend contract (all three HTTP clients hardcode 127.0.0.1:8000).
   PORT: parseNumber(process.env.PORT, 8000),
   CORS_ALLOWED_ORIGINS: parseCorsOrigins(process.env.CORS_ALLOWED_ORIGINS),
-  MODEL_DIR: process.env.MODEL_DIR ?? 'dl_models/prompt_injection_model',
+  // A relative path is resolved against the backend package, not the working directory: the
+  // installed app and `npm run electron:start` start the backend from elsewhere, and a path
+  // relative to their working directory silently dropped them to rule-based detection.
+  MODEL_DIR: path.resolve(BACKEND_ROOT, process.env.MODEL_DIR ?? 'dl_models/prompt_injection_model'),
   CLASSIFIER_THRESHOLD: parseNumber(process.env.CLASSIFIER_THRESHOLD, 0.7),
   // Probability on Prompt Guard's MALICIOUS class at which the DL detector
   // flags a chunk. 0.5 is the model's own decision boundary; lower it to trade

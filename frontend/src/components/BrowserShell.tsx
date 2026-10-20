@@ -12,7 +12,9 @@ import type { AnalysisDetails } from '../types/analysisDetailsTypes'
 import type { BookmarkItem } from '../types/bookmarkTypes'
 import type { SecurityCheckResponse, WebpageContent } from '../types/securityTypes'
 import { extractDomainForFavicon, getFaviconCandidates, resolveNavigationUrl } from '../services/urlUtils'
-import type { BrowserPanel } from '../../electron/browserUITypes'
+import { MINIMUM_SCAN_DURATION_MS } from '../utils/scanProgress'
+import type { BrowserPanel, ConnectionInfo } from '../../electron/browserUITypes'
+import { initialConnection } from '../../electron/siteConnection'
 import '../styles/browser-panels.css'
 
 // Everything the first shell frame does not show is its own chunk: the assistant (chat + agent
@@ -29,7 +31,8 @@ const HOMEPAGE_TAB_TITLE = 'New tab'
 /** How long to wait for an agent-opened tab's webview to attach: 20 × 150ms. */
 const AGENT_TAB_ATTACH_ATTEMPTS = 20
 const AGENT_TAB_ATTACH_POLL_MS = 150
-const MINIMUM_WEBPAGE_SCAN_DURATION_MS = 10_000
+/** How long the scan bar sits at 100% before the report replaces it. */
+const SCAN_COMPLETE_HOLD_MS = 450
 /** A report drawer opens without its frozen page rather than wait longer than this for one. */
 const PAGE_FREEZE_TIMEOUT_MS = 200
 /** The frozen page outlives a closing drawer until the guest view is back on top of it. */
@@ -37,8 +40,7 @@ const PAGE_FREEZE_HOLD_MS = 400
 
 type FrozenPage = { image: string; luminance: number }
 
-function waitForMinimumScanDuration(startedAt: number, signal: AbortSignal) {
-  const remainingTime = MINIMUM_WEBPAGE_SCAN_DURATION_MS - (performance.now() - startedAt)
+function waitForScanDelay(remainingTime: number, signal: AbortSignal) {
   if (remainingTime <= 0) return Promise.resolve()
   return new Promise<void>((resolve, reject) => {
     const timer = window.setTimeout(resolve, remainingTime)
@@ -200,6 +202,7 @@ export function BrowserShell() {
   const [webpageScanResult, setWebpageScanResult] = useState<SecurityCheckResponse | null>(null)
   const [webpageScanContent, setWebpageScanContent] = useState<WebpageContent | null>(null)
   const [isScanningPage, setIsScanningPage] = useState(false)
+  const [isFinishingScan, setIsFinishingScan] = useState(false)
   const scanAbortControllerRef = useRef<AbortController | null>(null)
   // While a report drawer is open the guest view is hidden (a native view would
   // cover the drawer). A frame of the page, taken just before, stands in its
@@ -208,10 +211,22 @@ export function BrowserShell() {
   const isReportDrawerOpen = promptDrawerOpen || webpageDrawerOpen
   const [isProviderSettingsOpen, setIsProviderSettingsOpen] = useState(false)
   const [activeTargetId, setActiveTargetId] = useState<number | null>(null)
+  const [siteConnection, setSiteConnection] = useState<{ tabId: string; targetId: number; connection: ConnectionInfo } | null>(null)
+  useEffect(() => {
+    const ui = window.electronAPI?.browserUI
+    if (!ui) return
+    let live = true
+    let pushed = false
+    const stop = ui.onConnection((value) => { if (value.targetId === webviewHandlesRef.current.get(activeTabId)?.getWebContentsId()) { pushed = true; setSiteConnection({ ...value, tabId: activeTabId }) } })
+    const targetId = webviewHandlesRef.current.get(activeTabId)?.getWebContentsId()
+    if (targetId !== undefined && targetId !== null) void ui.connection(targetId).then((connection) => { if (live && !pushed) setSiteConnection({ tabId: activeTabId, targetId, connection }) }).catch(() => undefined)
+    return () => { live = false; stop() }
+  }, [activeTabId, currentUrl])
   const [bookmarks, setBookmarks] = useState<BookmarkItem[]>(readStoredBookmarks)
   const [showBookmarksBar, setShowBookmarksBar] = useState(true)
   const [browserMenuOpen, setBrowserMenuOpen] = useState(false)
   const [activeDownloads, setActiveDownloads] = useState(0)
+  const [pendingUpdate, setPendingUpdate] = useState<'available' | 'ready' | null>(null)
   const [browserActionError, setBrowserActionError] = useState('')
 
   const runBrowserAction = useCallback((action: Promise<unknown> | undefined) => {
@@ -231,11 +246,15 @@ export function BrowserShell() {
       setShowBookmarksBar(snapshot.settings.showBookmarksBar)
       setActiveDownloads(snapshot.downloads.filter((entry) => entry.state === 'progressing').length)
     }
+    const receiveUpdate = ({ status, release }: Awaited<ReturnType<typeof ui.updateState>>) => setPendingUpdate(
+      status === 'downloaded' || status === 'installing' ? 'ready' : status === 'available' || status === 'downloading' || (status === 'error' && release) ? 'available' : null)
     const unsubscribe = ui.onSnapshot(receive)
+    const updates = ui.onUpdate(receiveUpdate)
     const visibility = ui.onVisibility(setBrowserMenuOpen)
-    const restoreFocus = ui.onRestoreFocus(() => document.querySelector<HTMLButtonElement>('.brave-menu-btn')?.focus())
+    const restoreFocus = ui.onRestoreFocus((target) => document.querySelector<HTMLButtonElement>(target === 'site' ? '.site-connection-button' : '.brave-menu-btn')?.focus())
     runBrowserAction(ui.importBookmarks(readStoredBookmarks()).then(() => ui.snapshot()).then(receive))
-    return () => { unsubscribe(); visibility(); restoreFocus() }
+    runBrowserAction(ui.updateState().then(receiveUpdate))
+    return () => { unsubscribe(); updates(); visibility(); restoreFocus() }
   }, [runBrowserAction])
 
   useEffect(() => {
@@ -599,7 +618,9 @@ export function BrowserShell() {
       setWebpageDrawerOpen(true)
 
       const result = await checkWebpage(content, signal)
-      await waitForMinimumScanDuration(scanStartedAt, signal)
+      await waitForScanDelay(MINIMUM_SCAN_DURATION_MS - (performance.now() - scanStartedAt), signal)
+      setIsFinishingScan(true)
+      await waitForScanDelay(SCAN_COMPLETE_HOLD_MS, signal)
       setWebpageScanResult(result)
 
     } catch (error) {
@@ -611,6 +632,7 @@ export function BrowserShell() {
       setWebpageDrawerOpen(false)
     } finally {
       setIsScanningPage(false)
+      setIsFinishingScan(false)
       if (scanAbortControllerRef.current === controller) {
         scanAbortControllerRef.current = null
       }
@@ -650,6 +672,7 @@ export function BrowserShell() {
       scanAbortControllerRef.current = null
     }
     setIsScanningPage(false)
+    setIsFinishingScan(false)
     setWebpageDrawerOpen(false)
   }, [])
 
@@ -753,6 +776,11 @@ export function BrowserShell() {
           addressValue={addressValue}
           assistantOpen={assistantOpen}
           currentUrl={currentUrl}
+          connection={siteConnection?.tabId === activeTabId && siteConnection.connection.url === currentUrl ? siteConnection.connection : initialConnection(currentUrl)}
+          onConnectionOpen={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect()
+            showBrowserPanel('connection', { x: rect.left, y: rect.bottom + 10 })
+          }}
           isLoading={isCurrentTabLoading}
           isScanning={isScanningPage}
           isBookmarked={isCurrentUrlBookmarked}
@@ -766,6 +794,7 @@ export function BrowserShell() {
           onScanPage={handleScanPage}
           onToggleBookmark={handleToggleBookmarkCurrentPage}
           menuOpen={browserMenuOpen}
+          pendingUpdate={pendingUpdate}
           activeDownloads={activeDownloads}
           onDownloadsOpen={() => showBrowserPanel('downloads')}
           onMenuOpen={(event) => {
@@ -844,6 +873,7 @@ export function BrowserShell() {
         <WebpageAnalysisDetailsPanel
           content={webpageScanContent}
           isScanning={isScanningPage}
+          isFinishing={isFinishingScan}
           result={webpageScanResult}
           isOpen={webpageDrawerOpen}
           onClose={handleCloseWebpageDrawer}

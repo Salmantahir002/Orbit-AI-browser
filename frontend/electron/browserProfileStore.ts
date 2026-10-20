@@ -19,7 +19,8 @@ export class BrowserProfileStore {
   history: HistoryEntry[] = []
   downloads: DownloadEntry[] = []
   bookmarks: Bookmark[] = []
-  settings: BrowserSettings = { downloadFolder: app.getPath('downloads'), askWhereToSave: false, showBookmarksBar: true, defaultZoom: 100 }
+  settings: BrowserSettings = { downloadFolder: app.getPath('downloads'), askWhereToSave: false, showBookmarksBar: true, defaultZoom: 100, allowAiMicrophone: false }
+  onMicrophoneRevoked = () => {}
   onChange = () => {}
 
   constructor() {
@@ -67,6 +68,10 @@ export class BrowserProfileStore {
 
   updateSettings(value: Partial<BrowserSettings> | undefined, notify = true): void {
     if (!value || typeof value !== 'object') return
+    if (typeof value.allowAiMicrophone === 'boolean') {
+      this.settings.allowAiMicrophone = value.allowAiMicrophone
+      if (!value.allowAiMicrophone) this.onMicrophoneRevoked()
+    }
     if (typeof value.askWhereToSave === 'boolean') this.settings.askWhereToSave = value.askWhereToSave
     if (typeof value.showBookmarksBar === 'boolean') this.settings.showBookmarksBar = value.showBookmarksBar
     if (typeof value.defaultZoom === 'number' && ZOOM_LEVELS.includes(value.defaultZoom)) this.settings.defaultZoom = value.defaultZoom

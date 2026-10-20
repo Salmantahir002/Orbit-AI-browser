@@ -5,16 +5,17 @@ import { GlassSwitch } from './GlassSwitch'
 import { LiquidGlass } from './LiquidGlass'
 import { ReportDrawer } from './ReportDrawer'
 import { ScanSummarySection } from './ScanSummarySection'
+import { estimateScanDurationMs, formatElapsed, formatScanProgress, scanProgressAt } from '../utils/scanProgress'
 
 type Props = {
   content: WebpageContent | null
   isOpen: boolean
   isScanning: boolean
+  /** The result is in; the bar shows 100% for a moment before the report replaces it. */
+  isFinishing?: boolean
   result: SecurityCheckResponse | null
   onClose: () => void
 }
-
-const MINIMUM_SCAN_DURATION_MS = 10_000
 
 // ── Icons (Lucide style) ──────────────────────────────────────────────────────
 
@@ -95,8 +96,9 @@ const CONTENT_CHANNELS: Array<{ key: keyof WebpageContent; label: string }> = [
 
 // ── Fluid Scanning Progress Sub-component ─────────────────────────────────────
 
-function ScanProgress({ content }: { content: WebpageContent }) {
+function ScanProgress({ content, isFinishing }: { content: WebpageContent; isFinishing: boolean }) {
   const [elapsed, setElapsed] = useState(0)
+  const [expectedMs] = useState(() => estimateScanDurationMs(content))
 
   useEffect(() => {
     const startedAt = performance.now()
@@ -107,14 +109,19 @@ function ScanProgress({ content }: { content: WebpageContent }) {
     return () => window.clearInterval(timer)
   }, [])
 
-  const progress = Math.min(96, Math.max(8, Math.round((elapsed / MINIMUM_SCAN_DURATION_MS) * 100)))
-  const phase = progress < 30
-    ? 'Capturing rendered frames and DOM snapshots'
-    : progress < 58
-      ? 'Inspecting shadow DOM, hidden CSS, and accessibility text'
-      : progress < 82
-        ? 'Reviewing scripts, metadata, and stylesheets'
-        : 'Classifying content for prompt-injection patterns'
+  const progress = isFinishing ? 100 : scanProgressAt(elapsed, expectedMs)
+  const progressLabel = formatScanProgress(progress)
+  const phase = isFinishing
+    ? 'Scan complete. Preparing the report'
+    : progress < 30
+      ? 'Capturing rendered frames and DOM snapshots'
+      : progress < 58
+        ? 'Inspecting shadow DOM, hidden CSS, and accessibility text'
+        : progress < 82
+          ? 'Reviewing scripts, metadata, and stylesheets'
+          : elapsed > expectedMs
+            ? 'Still classifying content. Larger pages take longer'
+            : 'Classifying content for prompt-injection patterns'
 
   return (
     <div className="webpage-scan-progress" aria-live="polite">
@@ -133,17 +140,20 @@ function ScanProgress({ content }: { content: WebpageContent }) {
         {/* Progress Bar (shadcn Progress) */}
         <div
           className="webpage-scan-progress__track"
-          aria-label={`${progress}% scan progress`}
+          aria-label={`${progressLabel}% scan progress`}
           role="progressbar"
           aria-valuemax={100}
           aria-valuemin={0}
-          aria-valuenow={progress}
+          aria-valuenow={Math.floor(progress)}
         >
-          <span style={{ width: `${progress}%` }} />
+          <span
+            className={isFinishing ? undefined : 'webpage-scan-progress__fill--active'}
+            style={{ width: `${progress}%` }}
+          />
         </div>
 
         <div className="webpage-scan-progress__meta">
-          <span>{progress}% completed</span>
+          <span>{progressLabel}% completed · {formatElapsed(elapsed)}</span>
           <strong>{content.visible_text.length.toLocaleString()} characters</strong>
         </div>
 
@@ -215,7 +225,7 @@ function SuspiciousChunk({ chunk }: { chunk: ChunkResult }) {
 
 // ── Main Panel ────────────────────────────────────────────────────────────────
 
-export function WebpageAnalysisDetailsPanel({ content, isOpen, isScanning, result, onClose }: Props) {
+export function WebpageAnalysisDetailsPanel({ content, isOpen, isScanning, isFinishing = false, result, onClose }: Props) {
   const [activeTab, setActiveTab] = useState<'overview' | 'channels'>('overview')
 
   if (!content || (!isScanning && !result)) return null
@@ -232,7 +242,7 @@ export function WebpageAnalysisDetailsPanel({ content, isOpen, isScanning, resul
         subtitle="Inspecting page content for indirect prompt injections"
         closeLabel="Close webpage scan report"
       >
-        <ScanProgress content={content} />
+        <ScanProgress content={content} isFinishing={isFinishing} />
       </ReportDrawer>
     )
   }

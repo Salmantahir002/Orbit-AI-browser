@@ -397,6 +397,7 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
           case 'did-navigate':
           case 'did-navigate-in-page':
             if (event.url) {
+              setErrorMessage('')
               setActiveUrl(event.url)
               onNavigate(tabId, event.url)
             }
@@ -413,6 +414,7 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
             break
           case 'did-fail-load':
             if (event.errorCode === -3) break // aborted by a subsequent navigation
+            if (event.url) { setActiveUrl(event.url); onNavigate(tabId, event.url) }
             setErrorMessage(event.errorDescription ?? 'Page failed to load')
             onLoadingChange(tabId, false)
             break

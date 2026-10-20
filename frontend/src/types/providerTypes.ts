@@ -11,6 +11,9 @@ export interface ModelInfo {
 }
 
 export interface ClientProviderConfig {
+  transcribe_model?: string
+  transcribe_models?: import('../../electron/aiAudioTypes').TranscribeModel[]
+  is_audio_provider?: boolean
   id: string
   name: string
   provider_type: ProviderApiType
@@ -18,6 +21,8 @@ export interface ClientProviderConfig {
   api_key?: string
   masked_key?: string
   has_key?: boolean
+  key_storage?: 'encrypted' | 'session' | 'unavailable' | 'none'
+  storage_message?: string
   verify_ssl: boolean
   selected_model?: string
   models?: ModelInfo[]

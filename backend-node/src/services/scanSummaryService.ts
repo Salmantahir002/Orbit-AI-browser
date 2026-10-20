@@ -66,18 +66,22 @@ function ruleDescription(chunk: ChunkResult): string {
 
 function scanFacts({ analysis_details: details, source, url, page_title }: ExplainScanRequest) {
   const flagged = details.chunk_results.filter((chunk) => chunk.label === 'malicious')
+  // Webpage chunks only the DL model flagged, cleared because no flagged
+  // passage was AI-directed (see AI_DIRECTED_CUE_PATTERN).
+  const dismissed = details.chunk_results.filter((chunk) =>
+    chunk.label === 'benign' && chunk.dl.available && chunk.dl.matched && !chunk.dl.error)
   const channels = [...new Set(details.chunk_results.map((chunk) => channelName(chunk.source)))]
   const engine = details.classifier_mode === 'dl_model'
     ? 'deep-learning model + rule-based detector'
     : 'rule-based detector only (the deep-learning model is not loaded)'
   return {
-    details, flagged, channels, engine, url, title: page_title || 'Untitled page',
+    details, flagged, dismissed, channels, engine, url, title: page_title || 'Untitled page',
     isPrompt: source === 'direct_prompt',
   }
 }
 
 function buildDigest(request: ExplainScanRequest): string {
-  const { details, flagged, channels, engine, url, title, isPrompt } = scanFacts(request)
+  const { details, flagged, dismissed, channels, engine, url, title, isPrompt } = scanFacts(request)
   const lines = isPrompt
     ? [`Input: a prompt typed by the user (${details.preprocessing.original_length} characters)`]
     : [`Page: ${title} (${url ?? 'unknown url'})`]
@@ -98,6 +102,12 @@ function buildDigest(request: ExplainScanRequest): string {
   if (flagged.length > MAX_FLAGGED_CHUNKS) {
     lines.push(`(${flagged.length - MAX_FLAGGED_CHUNKS} more flagged chunks omitted)`)
   }
+  if (dismissed.length > 0) {
+    lines.push(
+      `Cleared model-only signals: ${dismissed.length} chunk(s) scored high by the deep-learning model alone were ` +
+      "treated as ordinary page text, because no flagged passage addresses an AI, its instructions, or the user's data.",
+    )
+  }
   // A clean verdict is easier to explain with something to point at.
   const first = details.chunk_results[0]
   if (isPrompt && flagged.length === 0 && first) {
@@ -110,7 +120,7 @@ function buildDigest(request: ExplainScanRequest): string {
 }
 
 function localSummary(request: ExplainScanRequest): string {
-  const { details, flagged, channels, engine, isPrompt } = scanFacts(request)
+  const { details, flagged, dismissed, channels, engine, isPrompt } = scanFacts(request)
   const scope = isPrompt
     ? `${details.chunking.chunk_count} section(s) of your prompt using the ${engine}`
     : `${details.chunking.chunk_count} chunks from ${channels.length} content channels (${channels.join(', ')}) using the ${engine}`
@@ -124,7 +134,10 @@ function localSummary(request: ExplainScanRequest): string {
       ].join('\n\n')
       : [
         'Verdict: This page looks clean.',
-        `What was found: The scan checked ${scope}. Neither detector found text that tries to give instructions to an AI assistant.`,
+        `What was found: The scan checked ${scope}. Neither detector found text that tries to give instructions to an AI assistant.` +
+        (dismissed.length > 0
+          ? ` The deep-learning model scored ${dismissed.length} block(s) high on its own, but none of them addresses an AI, its instructions, or your data, so they were treated as ordinary page text.`
+          : ''),
         'What to do: No action needed for prompt injection. This does not prove the site itself is trustworthy.',
       ].join('\n\n')
   }

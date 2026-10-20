@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState, useId, type FormEvent } from 'react'
+import { useLiveTranscription } from './useLiveTranscription'
+import { MicrophoneButton, MicrophoneStatus } from './MicrophoneButton'
 import { AgentTask } from '../services/agentRuntimeCore'
 import { setAgentInputLock } from '../services/browserRuntime'
 import type { ApprovalRequest } from '../services/agentApprovalPolicy'
 import type { AgentTaskResult } from '../types/agentTypes'
 import { PromptModelPicker } from './PromptModelPicker'
+import { PromptExpandButton } from './PromptExpandButton'
 import { AgentResultMessage } from './AgentResultMessage'
 import { LiquidGlass } from './LiquidGlass'
 import { trackDockHeight } from '../utils/floatingDock'
@@ -31,6 +34,9 @@ type AgentModePanelProps = {
 
 export function AgentModePanel({ targetId, currentUrl, onOpenTab, onOpenSettings }: AgentModePanelProps) {
   const [goal, setGoal] = useState('')
+  const [isExpanded, setIsExpanded] = useState(false)
+  const goalInputId = useId()
+  const voice = useLiveTranscription(goal, setGoal)
   const [activeGoal, setActiveGoal] = useState('')
   const [isRunning, setIsRunning] = useState(false)
   const [steps, setSteps] = useState<StepEntry[]>([])
@@ -101,7 +107,7 @@ export function AgentModePanel({ targetId, currentUrl, onOpenTab, onOpenSettings
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const trimmedGoal = goal.trim()
-    if (!trimmedGoal || isRunning) return
+    if (!trimmedGoal || isRunning || voice.busy) return
 
     if (targetId === null) {
       setStatus('The browser view is not ready yet. Open a page first.')
@@ -284,11 +290,25 @@ export function AgentModePanel({ targetId, currentUrl, onOpenTab, onOpenSettings
 
         {/* The goal box and its button share one framed composer so the button
             can never drift out of alignment as the textarea grows. */}
-        <form className="agent-goal-form lg-host" onSubmit={handleSubmit}>
+        <form
+          className={`agent-goal-form lg-host${isExpanded ? ' prompt-composer--expanded' : ''}`}
+          onSubmit={handleSubmit}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && isExpanded && !event.defaultPrevented) {
+              event.preventDefault()
+              setIsExpanded(false)
+            }
+          }}
+        >
           <LiquidGlass refraction={96} bezel={22} blur={6} elasticity={0.14} />
+          <div className="prompt-composer-header">
+            <PromptExpandButton expanded={isExpanded} controls={goalInputId} onToggle={() => setIsExpanded((value) => !value)} />
+          </div>
           <textarea
+            id={goalInputId}
             className="agent-goal-input"
             aria-label="Agent goal"
+            readOnly={voice.busy}
             placeholder="What should the agent do on this page?"
             rows={2}
             value={goal}
@@ -303,15 +323,17 @@ export function AgentModePanel({ targetId, currentUrl, onOpenTab, onOpenSettings
           />
           <div className="agent-goal-footer">
             <div className="agent-goal-footer-left">
+              <MicrophoneButton state={voice.state} disabled={isRunning} onClick={() => { void voice.toggle() }} />
               <PromptModelPicker onOpenSettings={onOpenSettings} />
               <span className="agent-goal-hint">{isRunning ? 'Running…' : 'Enter to run'}</span>
             </div>
             {isRunning ? (
               <button type="button" className="agent-stop-button lg-press" onClick={handleStop}>Stop</button>
             ) : (
-              <button type="submit" className="agent-run-button lg-press" disabled={!goal.trim()}>Run</button>
+              <button type="submit" className="agent-run-button lg-press" disabled={!goal.trim() || voice.busy}>Run</button>
             )}
           </div>
+          <MicrophoneStatus state={voice.state} error={voice.error} />
         </form>
       </div>
 

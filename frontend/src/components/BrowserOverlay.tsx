@@ -2,10 +2,11 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent, type React
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'framer-motion'
-import { ArrowDownToLine, ArrowUpRight, Bookmark as BookmarkIcon, Check, ChevronRight, Download, ExternalLink, File, FolderOpen, Globe, History, Info, Maximize, Minus, MoreHorizontal, PanelTop, Pause, Pencil, Play, Plus, Printer, RotateCcw, Search, Settings, Shield, SquareArrowOutUpRight, Trash2, X, LogOut } from 'lucide-react'
-import type { Bookmark, BrowserPanel, BrowserSnapshot, BrowserUIBridge, ClearDataRequest, DownloadEntry, OverlayState } from '../../electron/browserUITypes'
+import { ArrowDownToLine, ArrowUpRight, Bookmark as BookmarkIcon, Check, ChevronRight, CircleArrowUp, CircleCheck, Download, ExternalLink, File, FolderOpen, Globe, History, Info, LoaderCircle, Maximize, Minus, MoreHorizontal, PanelTop, Pause, Pencil, Play, Plus, Printer, RefreshCw, RotateCcw, RotateCw, Search, Settings, Shield, SquareArrowOutUpRight, Trash2, X, LogOut } from 'lucide-react'
+import type { Bookmark, BrowserPanel, BrowserSnapshot, BrowserUIBridge, ClearDataRequest, DownloadEntry, OverlayState, UpdateState } from '../../electron/browserUITypes'
 import { ZOOM_LEVELS } from '../../electron/browserUITypes'
 import { BrowserLogo } from './BrowserLogo'
+import { SiteControlsPopup } from './SiteControlsPopup'
 import '../styles/browser-panels.css'
 
 type Actions = { ui: BrowserUIBridge; run: (action: () => Promise<unknown>, success?: string) => Promise<boolean>; navigate: (url: string) => void; show: (panel: BrowserPanel) => void }
@@ -26,8 +27,8 @@ function EmptyState({ icon, title, description }: { icon: ReactNode; title: stri
   return <div className="bp-empty"><div>{icon}</div><h3>{title}</h3><p>{description}</p></div>
 }
 
-function MenuItem({ icon, children, shortcut, onSelect, disabled = false }: { icon: ReactNode; children: ReactNode; shortcut?: string; onSelect: () => void; disabled?: boolean }) {
-  return <Menu.Item className="bp-menu-item" disabled={disabled} onSelect={(event) => { event.preventDefault(); onSelect() }}>{icon}<span>{children}</span>{shortcut ? <kbd>{shortcut}</kbd> : null}</Menu.Item>
+function MenuItem({ icon, children, shortcut, onSelect, disabled = false, className = '' }: { icon: ReactNode; children: ReactNode; shortcut?: string; onSelect: () => void; disabled?: boolean; className?: string }) {
+  return <Menu.Item className={`bp-menu-item ${className}`} disabled={disabled} onSelect={(event) => { event.preventDefault(); onSelect() }}>{icon}<span>{children}</span>{shortcut ? <kbd>{shortcut}</kbd> : null}</Menu.Item>
 }
 
 function preserveSubmenuPointerTransfer(event: PointerEvent<HTMLDivElement>) {
@@ -37,15 +38,17 @@ function preserveSubmenuPointerTransfer(event: PointerEvent<HTMLDivElement>) {
   if (next instanceof Element && next.closest('.bp-submenu')?.id === event.currentTarget.getAttribute('aria-controls')) event.preventDefault()
 }
 
-function BrowserMenu({ state, snapshot, actions, closeAction }: { state: OverlayState; snapshot: BrowserSnapshot; actions: Actions; closeAction: (action?: () => Promise<unknown>) => void }) {
+function BrowserMenu({ state, snapshot, update, actions, closeAction }: { state: OverlayState; snapshot: BrowserSnapshot; update: UpdateState | null; actions: Actions; closeAction: (action?: () => Promise<unknown>) => void }) {
   const { ui, run, show, navigate } = actions
   const currentIsBookmarked = snapshot.bookmarks.some((entry) => entry.url === state.url)
+  const updateLabel = update?.status === 'downloaded' ? 'Restart to update Orbit' : update?.status === 'downloading' ? 'Downloading update…' : update?.status === 'available' ? 'Update Orbit' : null
   const menuPosition = { left: Math.min(window.innerWidth - 12, Math.max(320, state.anchor.x)), top: Math.max(4, Math.min(window.innerHeight - 440, state.anchor.y)) }
   return <Menu.Root open onOpenChange={(open) => { if (!open) closeAction() }} modal>
     <Menu.Trigger className="bp-menu-anchor" style={menuPosition} aria-label="Browser menu anchor" tabIndex={-1} />
     <Menu.Portal>
       <Menu.Content asChild forceMount align="end" side="bottom" sideOffset={0} collisionPadding={10} onCloseAutoFocus={(event) => event.preventDefault()}>
         <motion.div className="bp-menu" aria-label="Customize and control Orbit" initial={{ opacity: 0, scale: 0.94, y: -8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.97, y: -4 }} transition={{ type: 'spring', stiffness: 480, damping: 34 }}>
+          {updateLabel ? <><MenuItem className="bp-menu-update" icon={<CircleArrowUp />} onSelect={() => show('about')}>{updateLabel}</MenuItem><Menu.Separator className="bp-separator" /></> : null}
           <Menu.Group>
             <MenuItem icon={<PanelTop />} shortcut="Ctrl+T" onSelect={() => closeAction(() => ui.command('new-tab'))}>New tab</MenuItem>
             <MenuItem icon={<SquareArrowOutUpRight />} shortcut="Ctrl+N" onSelect={() => closeAction(() => ui.newWindow())}>New window</MenuItem>
@@ -209,15 +212,69 @@ function ClearDataPanel({ actions }: { actions: Actions }) {
 function SettingsPanel({ snapshot, actions, closeAction }: { snapshot: BrowserSnapshot; actions: Actions; closeAction: (action?: () => Promise<unknown>) => void }) {
   return <><div className="bp-settings-heading"><PanelTop size={18} /><h3>Appearance & browsing</h3></div><div className="bp-card bp-settings-card"><Toggle label="Show bookmarks bar" description="Keep saved pages just below the address bar." checked={snapshot.settings.showBookmarksBar} onChange={(checked) => { void actions.run(() => actions.ui.updateSettings({ showBookmarksBar: checked })) }} /><div className="bp-setting-row"><div><label className="bp-setting-title" htmlFor="default-zoom">Default page zoom</label><p>Applied when a new browser tab is created.</p></div><select id="default-zoom" value={snapshot.settings.defaultZoom} onChange={(event) => { void actions.run(() => actions.ui.updateSettings({ defaultZoom: Number(event.target.value) })) }}>{ZOOM_LEVELS.map((value) => <option key={value} value={value}>{value}%</option>)}</select></div></div>
     <div className="bp-settings-heading"><Download size={18} /><h3>Downloads</h3></div><DownloadPreferences snapshot={snapshot} actions={actions} />
-    <div className="bp-settings-heading"><Shield size={18} /><h3>Privacy</h3></div><div className="bp-card bp-settings-card"><button className="bp-settings-link" type="button" onClick={() => actions.show('clear-data')}><div><strong>Delete browsing data</strong><p>Manage history, cookies, and cached files.</p></div><ChevronRight size={17} /></button></div>
+    <div className="bp-settings-heading"><Shield size={18} /><h3>Privacy</h3></div><div className="bp-card bp-settings-card"><Toggle label="Allow Microphone Access for AI Features" description="Send voice input to Gemini while recording. Turning this off stops recording and clears approval; the next mic click asks again." checked={snapshot.settings.allowAiMicrophone} onChange={(checked) => { void actions.run(() => actions.ui.updateSettings({ allowAiMicrophone: checked })) }} /><button className="bp-settings-link" type="button" onClick={() => actions.show('clear-data')}><div><strong>Delete browsing data</strong><p>Manage history, cookies, and cached files.</p></div><ChevronRight size={17} /></button></div>
     <div className="bp-settings-heading"><Settings size={18} /><h3>AI Agent</h3></div><div className="bp-card bp-settings-card"><button className="bp-settings-link" type="button" onClick={() => closeAction(() => actions.ui.command('provider-settings'))}><div><strong>AI providers & models</strong><p>Configure the providers used by your assistant.</p></div><ArrowUpRight size={17} /></button></div><button className="bp-button bp-button-ghost bp-about-link" type="button" onClick={() => actions.show('about')}>About Orbit <ChevronRight size={14} /></button></>
 }
 
-function AboutPanel({ snapshot }: { snapshot: BrowserSnapshot }) {
-  return <><div className="bp-about-hero"><BrowserLogo size={70} /><h3>Orbit</h3><p>A browser for agentic search<br />with prompt defense.</p><span className="bp-version">Version {snapshot.versions.orbit}</span></div><div className="bp-card bp-version-table">{[['Chromium', snapshot.versions.chromium], ['Electron', snapshot.versions.electron], ['Node.js', snapshot.versions.node], ['Platform', snapshot.versions.platform]].map(([label, value]) => <div key={label}><span>{label}</span><code>{value}</code></div>)}</div><p className="bp-note bp-about-note">Built on Chromium. Designed for thoughtful browsing.</p></>
+function updateButton(update: UpdateState | null): { label: string; icon: ReactNode; primary: boolean; disabled: boolean } {
+  switch (update?.status) {
+    case 'checking': return { label: 'Checking…', icon: <LoaderCircle size={13} className="bp-spin" />, primary: false, disabled: true }
+    case 'available': return { label: 'Update', icon: <CircleArrowUp size={13} />, primary: true, disabled: false }
+    case 'downloading': return { label: `${Math.floor(update.progress?.percent ?? 0)}%`, icon: <LoaderCircle size={13} className="bp-spin" />, primary: false, disabled: true }
+    case 'downloaded': return { label: 'Restart to update', icon: <RotateCw size={13} />, primary: true, disabled: false }
+    case 'installing': return { label: 'Restarting…', icon: <LoaderCircle size={13} className="bp-spin" />, primary: true, disabled: true }
+    case 'error': return { label: 'Try again', icon: <RefreshCw size={13} />, primary: false, disabled: false }
+    default: return { label: 'Check for updates', icon: <RefreshCw size={13} />, primary: false, disabled: !update || update.status === 'unsupported' }
+  }
 }
 
-const PANEL_DETAILS: Record<Exclude<BrowserPanel, 'menu'>, { title: string; description: string; icon: ReactNode }> = {
+function RuntimeChange({ label, current, next }: { label: string; current: string; next?: string }) {
+  if (!next) return null
+  return <div><dt>{label}</dt><dd>{next === current ? <><code>{current}</code><span className="bp-muted">unchanged</span></> : <><code className="bp-muted">{current}</code><span aria-hidden="true">→</span><code className="bp-update-new">{next}</code></>}</dd></div>
+}
+
+function AboutPanel({ snapshot, update, actions }: { snapshot: BrowserSnapshot; update: UpdateState | null; actions: Actions }) {
+  const [confirmRestart, setConfirmRestart] = useState(false)
+  const details = useRef<HTMLDivElement>(null)
+  const reduceMotion = useReducedMotion()
+  const status = update?.status
+  // The update card and the restart prompt sit below the version table, out of view in a short
+  // window: bring them in whenever they change, or pressing the button would seem to do nothing.
+  useEffect(() => {
+    if (status && status !== 'idle' && status !== 'unsupported' && status !== 'checking') details.current?.scrollIntoView({ block: 'nearest', behavior: reduceMotion ? 'auto' : 'smooth' })
+  }, [status, confirmRestart, reduceMotion])
+  const { versions } = snapshot
+  const release = update?.release ?? null
+  const button = updateButton(update)
+  const progress = update?.status === 'downloading' ? update.progress : null
+  const ready = update?.status === 'downloaded' || update?.status === 'installing'
+  const onUpdate = () => {
+    if (update?.status === 'downloaded') setConfirmRestart(true)
+    else if (release && (update?.status === 'available' || update?.status === 'error')) void actions.run(() => actions.ui.downloadUpdate())
+    else void actions.run(() => actions.ui.checkForUpdates())
+  }
+  return <><div className="bp-about-hero"><BrowserLogo size={70} /><h3>Orbit</h3><p>A browser for agentic search<br />with prompt defense.</p><span className="bp-version">Version {versions.orbit}</span></div>
+    {update?.updatedFrom ? <p className="bp-success" role="status"><CircleCheck size={16} />Updated from Orbit {update.updatedFrom.orbit}{update.updatedFrom.chromium !== versions.chromium ? ` · Chromium ${update.updatedFrom.chromium} → ${versions.chromium}` : ''}</p> : null}
+    <div className="bp-card bp-version-table">
+      <div><span>Chromium</span><div className="bp-version-value"><code>{versions.chromium}</code><button type="button" className={`bp-button bp-update-button ${button.primary ? 'bp-button-primary' : ''}`} disabled={button.disabled} onClick={onUpdate} aria-describedby="bp-update-status">{button.icon}{button.label}</button></div></div>
+      {[['Electron', versions.electron], ['Node.js', versions.node], ['Platform', versions.platform]].map(([label, value]) => <div key={label}><span>{label}</span><code>{value}</code></div>)}
+    </div>
+    <div id="bp-update-status" ref={details} aria-live="polite">
+      {release && update && update.status !== 'up-to-date' ? <section className="bp-card bp-update-card" aria-label="Available update">
+        <h4><CircleArrowUp size={16} />Orbit {release.version} {ready ? 'is ready to install' : 'is available'}</h4>
+        {release.runtime.chromium || release.runtime.electron ? <dl className="bp-update-runtime"><RuntimeChange label="Chromium" current={versions.chromium} next={release.runtime.chromium} /><RuntimeChange label="Electron" current={versions.electron} next={release.runtime.electron} /></dl> : null}
+        {progress ? <><div className="bp-progress" role="progressbar" aria-label="Update download progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.floor(progress.percent)}><motion.div animate={{ scaleX: progress.percent / 100 }} transition={{ duration: 0.2 }} /></div><p className="bp-update-detail">{formatBytes(progress.transferred)}{progress.total ? ` of ${formatBytes(progress.total)}` : ''}{progress.bytesPerSecond ? ` · ${formatBytes(progress.bytesPerSecond)}/s` : ''}</p></> : null}
+        {update.status === 'downloaded' && confirmRestart ? <div className="bp-update-confirm"><p>Orbit will close, install the update, and open again. Open tabs won't be restored.</p><div className="bp-form-actions"><button className="bp-button" type="button" onClick={() => setConfirmRestart(false)}>Not now</button><button className="bp-button bp-button-primary" type="button" onClick={() => { void actions.run(() => actions.ui.installUpdate()) }}><RotateCw size={13} />Restart now</button></div></div>
+          : <p className="bp-update-detail">{update.status === 'downloaded' ? 'Restart Orbit to finish updating, or it will update the next time it closes.' : update.status === 'installing' ? 'Closing Orbit to install the update…' : 'Your bookmarks, history, and settings are kept.'}</p>}
+      </section> : null}
+      {update?.status === 'error' ? <div className="bp-alert" role="alert"><Info size={16} /><span>{update.error}</span></div> : null}
+      {update?.status === 'unsupported' ? <p className="bp-update-status">{update.reason}</p> : update?.status === 'up-to-date' ? <p className="bp-update-status"><CircleCheck size={14} />Orbit is up to date.</p> : null}
+    </div>
+    {/* "Built with Llama" is a condition of the Llama 4 Community License the detection model ships under. */}
+    <p className="bp-note bp-about-note">Built on Chromium. Designed for thoughtful browsing.<br />Prompt-injection model: Llama Prompt Guard 2 · Built with Llama</p></>
+}
+
+const PANEL_DETAILS: Partial<Record<BrowserPanel, { title: string; description: string; icon: ReactNode }>> = {
   history: { title: 'History', description: 'Find your way back to pages you visited.', icon: <History /> },
   downloads: { title: 'Downloads', description: 'Track your files from start to finish.', icon: <Download /> },
   bookmarks: { title: 'Bookmarks', description: 'Your favorite pages, organized in one place.', icon: <BookmarkIcon /> },
@@ -230,6 +287,7 @@ export function BrowserOverlay() {
   const ui = window.electronAPI?.browserUI
   const [snapshot, setSnapshot] = useState<BrowserSnapshot | null>(null)
   const [state, setState] = useState<OverlayState | null>(null)
+  const [update, setUpdate] = useState<UpdateState | null>(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const currentState = useRef<OverlayState | null>(null)
@@ -239,7 +297,7 @@ export function BrowserOverlay() {
     setError('')
     try { await action(); if (success) setNotice(success); return true } catch (cause) { setError(cause instanceof Error ? cause.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'The browser action could not be completed.'); return false }
   }, [])
-  const receiveState = useCallback((value: OverlayState) => { exitAction.current = undefined; currentState.current = value; setState(value); setError(''); setNotice('') }, [])
+  const receiveState = useCallback((value: OverlayState | null) => { exitAction.current = undefined; currentState.current = value; setState(value); setError(''); setNotice('') }, [])
   const closeAction = useCallback((action?: () => Promise<unknown>) => { exitAction.current = action; currentState.current = null; setState(null) }, [])
 
   useEffect(() => {
@@ -247,8 +305,11 @@ export function BrowserOverlay() {
     const stopSnapshot = ui.onSnapshot(setSnapshot)
     const stopOverlay = ui.onOverlay(receiveState)
     const stopDownloads = ui.onDownload((entry) => setSnapshot((current) => current ? { ...current, downloads: current.downloads.map((download) => download.id === entry.id ? entry : download) } : current))
+    const stopUpdate = ui.onUpdate(setUpdate)
     void ui.snapshot().then((value) => { setSnapshot(value); ui.ready() }).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'Browser data could not be loaded.'))
-    return () => { stopSnapshot(); stopOverlay(); stopDownloads() }
+    // A pushed state is newer than the reply to this request when it lands first.
+    void ui.updateState().then((value) => setUpdate((current) => current ?? value)).catch(() => undefined)
+    return () => { stopSnapshot(); stopOverlay(); stopDownloads(); stopUpdate() }
   }, [receiveState, ui])
 
   useEffect(() => {
@@ -268,14 +329,14 @@ export function BrowserOverlay() {
     void run(async () => { await ui.close(); if (after) await after() })
   }}>
     {state ? <motion.div key={state.panel} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: reduceMotion ? 0 : 0.12 }}>
-      {state.panel === 'menu' ? <BrowserMenu state={state} snapshot={snapshot} actions={actions} closeAction={closeAction} /> : details ? <Dialog.Root open onOpenChange={(open) => { if (!open) closeAction() }}><Dialog.Portal forceMount>
+      {state.panel === 'permission' || state.panel === 'connection' ? <SiteControlsPopup state={state} close={() => { void run(() => ui.close()) }} decide={(id, allow) => { void run(() => ui.decidePermission(id, allow)) }} /> : state.panel === 'menu' ? <BrowserMenu state={state} snapshot={snapshot} update={update} actions={actions} closeAction={closeAction} /> : details ? <Dialog.Root open onOpenChange={(open) => { if (!open) closeAction() }}><Dialog.Portal forceMount>
         <Dialog.Overlay asChild><motion.div className="bp-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: reduceMotion ? 0 : 0.18 }} /></Dialog.Overlay>
         <Dialog.Content asChild forceMount onCloseAutoFocus={(event) => event.preventDefault()}><motion.section className={`bp-panel ${sheet ? 'bp-sheet' : 'bp-dialog'} bp-panel-${state.panel}`} initial={reduceMotion ? { opacity: 0 } : sheet ? { x: 42, opacity: 0 } : { y: 12, scale: 0.97, opacity: 0 }} animate={{ x: 0, y: 0, scale: 1, opacity: 1 }} exit={reduceMotion ? { opacity: 0 } : sheet ? { x: 28, opacity: 0 } : { y: 6, scale: 0.98, opacity: 0 }} transition={{ type: 'spring', stiffness: 380, damping: 34 }}>
           <header className="bp-panel-header"><span className="bp-panel-symbol">{details.icon}</span><div><Dialog.Title>{details.title}</Dialog.Title><Dialog.Description>{details.description}</Dialog.Description></div><IconButton label={`Close ${details.title}`} onClick={() => closeAction()}><X size={18} /></IconButton></header>
           <div className="bp-panel-body">
             {error ? <div className="bp-alert" role="alert"><Info size={16} /><span>{error}</span><IconButton label="Dismiss error" onClick={() => setError('')}><X size={14} /></IconButton></div> : null}
             {notice ? <div className="bp-success" role="status"><Check size={16} />{notice}</div> : null}
-            {state.panel === 'history' ? <HistoryPanel snapshot={snapshot} actions={actions} /> : state.panel === 'downloads' ? <DownloadsPanel snapshot={snapshot} actions={actions} /> : state.panel === 'bookmarks' ? <BookmarksPanel snapshot={snapshot} actions={actions} state={state} /> : state.panel === 'clear-data' ? <ClearDataPanel actions={actions} /> : state.panel === 'settings' ? <SettingsPanel snapshot={snapshot} actions={actions} closeAction={closeAction} /> : <AboutPanel snapshot={snapshot} />}
+            {state.panel === 'history' ? <HistoryPanel snapshot={snapshot} actions={actions} /> : state.panel === 'downloads' ? <DownloadsPanel snapshot={snapshot} actions={actions} /> : state.panel === 'bookmarks' ? <BookmarksPanel snapshot={snapshot} actions={actions} state={state} /> : state.panel === 'clear-data' ? <ClearDataPanel actions={actions} /> : state.panel === 'settings' ? <SettingsPanel snapshot={snapshot} actions={actions} closeAction={closeAction} /> : <AboutPanel snapshot={snapshot} update={update} actions={actions} />}
           </div><footer className="bp-panel-footer"><BrowserLogo size={16} /><span>Orbit</span><span>{state.panel === 'downloads' ? 'Files stay on your device' : state.panel === 'history' ? 'History is saved on this device' : 'Your space to browse'}</span></footer>
         </motion.section></Dialog.Content>
       </Dialog.Portal></Dialog.Root> : null}

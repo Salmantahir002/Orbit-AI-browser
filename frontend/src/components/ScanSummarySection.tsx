@@ -47,22 +47,17 @@ function parseSummary(raw: string) {
 // ── In-memory caches to prevent duplicate API hits on tab switches ─────────
 const summaryDataCache = new WeakMap<AnalysisDetails, ScanSummary>()
 const summaryPromiseCache = new WeakMap<AnalysisDetails, Promise<ScanSummary>>()
-const typedScansCache = new WeakSet<AnalysisDetails>()
 
 /**
  * Plain-language explanation of a finished scan, written by the active provider
- * (or a built-in summary when none is available). Formatted as a modern shadcn/ui Card
- * with real-time typewriter streaming animation.
+ * (or a built-in summary when none is available). Displays the complete summary
+ * as soon as it is available.
  */
 export function ScanSummarySection({ source, details, page }: Props) {
   const cachedData = summaryDataCache.get(details) ?? null
   const [loadedDetails, setLoadedDetails] = useState<AnalysisDetails | null>(cachedData ? details : null)
   const [summary, setSummary] = useState<ScanSummary | null>(cachedData)
   const [failed, setFailed] = useState(false)
-
-  // Typing animation state
-  const isAlreadyTyped = typedScansCache.has(details)
-  const [charIndex, setCharIndex] = useState<number>(isAlreadyTyped ? 999999 : 0)
 
   useEffect(() => {
     // 1. Already cached in memory: render reads it directly, no network request
@@ -104,7 +99,7 @@ export function ScanSummarySection({ source, details, page }: Props) {
   const isLoading = !activeSummary && !hasFailed
   const parsed = activeSummary ? parseSummary(activeSummary.summary) : null
 
-  // Prepare ordered list of sections to type sequentially. Untitled sections
+  // Prepare ordered summary sections. Untitled sections
   // are the model's paragraphs that matched no known heading.
   const sections: Array<{ key: string; title: string; text: string }> = []
 
@@ -123,63 +118,15 @@ export function ScanSummarySection({ source, details, page }: Props) {
     })
   }
 
-  const totalChars = sections.reduce((acc, s) => acc + s.text.length, 0)
-
-  // Restart or finish the typewriter when the scan or its text changes. Adjusted
-  // during render (React's pattern for state derived from changing inputs).
-  const [typingFor, setTypingFor] = useState({ details, totalChars })
-  if (typingFor.details !== details || typingFor.totalChars !== totalChars) {
-    setTypingFor({ details, totalChars })
-    setCharIndex(typedScansCache.has(details) ? totalChars : 0)
-  }
-
-  // Typewriter stepping timer
-  useEffect(() => {
-    if (!parsed || totalChars === 0) return
-    if (typedScansCache.has(details)) return
-    if (charIndex >= totalChars) {
-      typedScansCache.add(details)
-      return
-    }
-
-    // Smooth, deliberate single-character typewriter pacing (1 char every 22ms)
-    const timer = window.setInterval(() => {
-      setCharIndex((current) => {
-        const next = current + 1
-        if (next >= totalChars) {
-          clearInterval(timer)
-          typedScansCache.add(details)
-          return totalChars
-        }
-        return next
-      })
-    }, 22)
-
-    return () => clearInterval(timer)
-  }, [parsed, totalChars, charIndex, details])
-
-  const handleSkipTyping = () => {
-    setCharIndex(totalChars)
-    typedScansCache.add(details)
-  }
-
-  const isTyping = !typedScansCache.has(details) && charIndex < totalChars && !isLoading && parsed !== null
-
-  let accumulatedChars = 0
-
   return (
-    <div className="analysis-card lg-host" onClick={isTyping ? handleSkipTyping : undefined} style={{ cursor: isTyping ? 'pointer' : 'default' }}>
+    <div className="analysis-card lg-host">
       <LiquidGlass refraction={0} blur={8} elasticity={0.05} />
       <div className="analysis-card__header">
         <div className="analysis-card__header-left">
           <SparklesIcon />
-          <span>Scan Summary & Insights</span>
+          <span>AI Summary</span>
         </div>
-        {isTyping ? (
-          <span className="drawer-badge">
-            Streaming analysis…
-          </span>
-        ) : activeSummary?.source === 'llm' ? (
+        {activeSummary?.source === 'llm' ? (
           <span className="drawer-badge" title={`Model: ${activeSummary.model || 'default'}`}>
             Explained by {activeSummary.provider || 'AI'}{activeSummary.model ? ` · ${activeSummary.model}` : ''}
           </span>
@@ -210,34 +157,17 @@ export function ScanSummarySection({ source, details, page }: Props) {
           </p>
         ) : null}
 
-        {/* Typewriter Streamed Insights */}
+        {/* Complete summary */}
         {parsed ? (
           <>
-            {sections.map((section) => {
-              const start = accumulatedChars
-              const end = start + section.text.length
-              accumulatedChars = end
+            {sections.map((section) => (
+              <section key={section.key} className="analysis-summary-section">
+                {section.title ? <h4 className="analysis-summary-section__title">{section.title}</h4> : null}
+                <p className="analysis-summary-section__text">{section.text}</p>
+              </section>
+            ))}
 
-              const isVisible = charIndex >= start || typedScansCache.has(details)
-              if (!isVisible) return null
-
-              const typedLength = Math.max(0, Math.min(charIndex - start, section.text.length))
-              const visibleText = typedScansCache.has(details) || charIndex >= end ? section.text : section.text.slice(0, typedLength)
-              const isCurrentlyTyping = !typedScansCache.has(details) && charIndex >= start && charIndex < end
-
-              // Plain headed paragraphs, as the model wrote them: no colour coding.
-              return (
-                <section key={section.key} className="analysis-summary-section">
-                  {section.title ? <h4 className="analysis-summary-section__title">{section.title}</h4> : null}
-                  <p className="analysis-summary-section__text">
-                    {visibleText}
-                    {isCurrentlyTyping && <span className="analysis-typing-cursor">▌</span>}
-                  </p>
-                </section>
-              )
-            })}
-
-            {activeSummary?.note && (!isTyping || charIndex >= totalChars) ? (
+            {activeSummary?.note ? (
               <p style={{ margin: '2px 0 0', fontSize: 11, color: '#71717a', lineHeight: 1.4 }}>
                 {activeSummary.note}
               </p>

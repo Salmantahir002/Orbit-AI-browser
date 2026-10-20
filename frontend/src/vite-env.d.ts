@@ -14,6 +14,7 @@ type BrowserTabEvent = {
 
 interface Window {
   electronAPI?: {
+    aiAudio: import('../electron/aiAudioTypes').AiAudioBridge
     scanWebview: (webContentsId: number) => Promise<unknown>
     runtimeInvoke: (request: { targetId: number; name: string; params: unknown }) => Promise<unknown>
     browserUI: import('../electron/browserUITypes').BrowserUIBridge
@@ -43,6 +44,8 @@ interface Window {
     }
     // Provider configs live in main's safeStorage-backed store; see providerApiClient.ts.
     providers: {
+      fetchModels: (config: import('./types/providerTypes').ClientProviderConfig) => Promise<import('./types/providerTypes').ModelInfo[]>
+      testConnection: (config: import('./types/providerTypes').ClientProviderConfig) => Promise<import('./types/providerTypes').TestConnectionResult>
       getAll: () => Promise<import('./types/providerTypes').ClientProviderConfig[]>
       save: (
         config: import('./types/providerTypes').ClientProviderConfig & { set_active?: boolean },

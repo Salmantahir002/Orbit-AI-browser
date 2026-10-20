@@ -17,6 +17,7 @@ import {
 } from '../schemas/security.schemas.js'
 import type { AnalysisDetails, ChunkResult } from '../schemas/analysisDetails.schemas.js'
 import { ErrorResponseSchema } from '../schemas/common.js'
+import { AI_DIRECTED_CUE_PATTERN } from '../core/securityConstants.js'
 
 // The original 14 DOM/accessibility/network channels (ported verbatim from
 // security_routes.py's MANUAL_SCAN_CHANNELS).
@@ -98,29 +99,53 @@ function chunkReason(
 // finds the passage the model actually reacted to.
 const MAX_FOCUSED_EXCERPT_CHARS = 400
 
-async function locateFlaggedPassages(texts: readonly string[]): Promise<string[]> {
-  const pieces = texts.map((text) =>
-    text.split(/(?<=[.!?])\s+|-->|<!--|\n+/).map((piece) => piece.trim()).filter((piece) => piece.length >= 20),
-  )
-  const flat = pieces.flat()
-  if (flat.length === 0) return texts.map(() => '')
+interface ModelOnlyInspection {
+  excerpt: string
+  /** A passage the model flagged on its own also carries an AI-directed cue. */
+  corroborated: boolean
+}
+
+/**
+ * Re-scores each model-only chunk as sentences and adjacent sentence pairs
+ * (pairs keep an attack split over two sentences together). The best-scoring
+ * passage becomes the excerpt; the chunk is corroborated when a passage the
+ * model flags by itself also matches AI_DIRECTED_CUE_PATTERN. A chunk whose
+ * score only appears with its neighbours ("Meta Superintelligence Labs": 0.02
+ * alone, 0.997 in its chunk) has no such passage and is not corroborated.
+ */
+async function inspectModelOnlyChunks(texts: readonly string[]): Promise<ModelOnlyInspection[]> {
+  const passages = texts.map((text) => {
+    const sentences = text.split(/(?<=[.!?])\s+|-->|<!--|\n+/).map((piece) => piece.trim()).filter((piece) => piece.length >= 20)
+    return [...sentences, ...sentences.slice(1).map((sentence, index) => `${sentences[index]} ${sentence}`)]
+  })
+  const flat = passages.flat()
+  if (flat.length === 0) return texts.map(() => ({ excerpt: '', corroborated: true }))
 
   try {
     const results = await promptClassifier.classifyMany(flat)
     let offset = 0
-    return pieces.map((group) => {
-      const scored = group.map((piece, index) => {
-        const result = results[offset + index]!
-        return { piece, score: result.dl.available ? result.dl.malicious_score : result.confidence }
+    return passages.map((group) => {
+      const scored = group.map((passage, index) => {
+        const { dl, confidence } = results[offset + index]!
+        return {
+          passage,
+          score: dl.available ? dl.malicious_score : confidence,
+          // A DL error on the re-score fails closed, like the chunk itself.
+          errored: dl.available && 'error' in dl,
+          flagged: dl.available && dl.matched,
+        }
       })
       offset += group.length
-      const best = scored.reduce<{ piece: string; score: number } | null>(
+      const cued = scored.filter((item) => item.flagged && AI_DIRECTED_CUE_PATTERN.test(item.passage))
+      const corroborated = group.length === 0 || cued.length > 0 || scored.some((item) => item.errored)
+      // Show the AI-directed passage when there is one, else what the model reacted to most.
+      const best = (cued.length > 0 ? cued : scored).reduce<(typeof scored)[number] | null>(
         (top, item) => (!top || item.score > top.score ? item : top), null)
-      return best ? best.piece.slice(0, MAX_FOCUSED_EXCERPT_CHARS) : ''
+      return { excerpt: best ? best.passage.slice(0, MAX_FOCUSED_EXCERPT_CHARS) : '', corroborated }
     })
   } catch {
-    // The excerpt is only a display aid; fall back to the chunk start.
-    return texts.map(() => '')
+    // Fail closed: keep the model's verdict and fall back to the chunk start.
+    return texts.map(() => ({ excerpt: '', corroborated: true }))
   }
 }
 
@@ -157,14 +182,23 @@ export async function analyzeText(
 
   const modelOnlyIndexes = detectorResults.flatMap((result, index) =>
     result.is_malicious && Object.keys(result.pattern_evidence).length === 0 ? [index] : [])
-  const focusedPassages = await locateFlaggedPassages(modelOnlyIndexes.map((index) => chunks[index]!.text))
-  const focusedExcerpts = new Map(modelOnlyIndexes.map((chunkIndex, i) => [chunkIndex, focusedPassages[i]!]))
+  const inspections = await inspectModelOnlyChunks(modelOnlyIndexes.map((index) => chunks[index]!.text))
+  const inspectionByChunk = new Map(modelOnlyIndexes.map((chunkIndex, i) => [chunkIndex, inspections[i]!]))
 
   for (const [chunkIndex, chunk] of chunks.entries()) {
     const detectorResult = detectorResults[chunkIndex]!
-    const label = detectorResult.is_malicious ? 'malicious' : 'benign'
+    const inspection = inspectionByChunk.get(chunkIndex)
+    // Webpage scans only: a model-only hit with no AI-directed passage is page
+    // copy, not an instruction (see AI_DIRECTED_CUE_PATTERN). Direct prompts
+    // are what Prompt Guard was built for and keep the model's verdict, as do
+    // rule matches and fail-closed DL errors.
+    const dismissed = source === 'webpage_content'
+      && detectorResult.detector_source === 'dl_model'
+      && !(detectorResult.dl.available && 'error' in detectorResult.dl)
+      && inspection?.corroborated === false
+    const label = detectorResult.is_malicious && !dismissed ? 'malicious' : 'benign'
     const confidence = label === 'malicious' ? detectorResult.confidence : 0.94
-    const matchedPatterns = detectorResult.matched_patterns
+    const matchedPatterns = dismissed ? [] : detectorResult.matched_patterns
     const matchedEvidence = [...new Set(Object.values(detectorResult.pattern_evidence).flat())].sort()
 
     for (const [category, keywords] of Object.entries(detectorResult.pattern_evidence)) {
@@ -181,8 +215,10 @@ export async function analyzeText(
       confidence,
       risk_level: label === 'benign' ? 'low' : riskLevelForConfidence(confidence),
       matched_patterns: matchedPatterns,
-      reason: chunkReason(label, matchedPatterns, matchedEvidence),
-      excerpt: focusedExcerpts.get(chunkIndex) || excerptForDisplay(chunk.text, matchedEvidence),
+      reason: dismissed && detectorResult.dl.available
+        ? `The deep-learning model scored this ${detectorResult.dl.malicious_score.toFixed(2)}, but no flagged passage addresses an AI, its instructions, or the user's data, so it is treated as ordinary page text.`
+        : chunkReason(label, matchedPatterns, matchedEvidence),
+      excerpt: inspection?.excerpt || excerptForDisplay(chunk.text, matchedEvidence),
       matched_evidence: matchedEvidence,
       detector_source: detectorResult.detector_source,
       rule_based: detectorResult.rule_based,

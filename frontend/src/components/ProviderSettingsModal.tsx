@@ -15,6 +15,7 @@ import {
 } from '../services/providerApiClient'
 import { LiquidGlass } from './LiquidGlass'
 import { ProviderLogo } from './ProviderIcons'
+import { AudioTranscribeSettings } from './AudioTranscribeSettings'
 
 /**
  * Liquid Glass, as in the assistant panel and the report drawers: the dialog
@@ -210,6 +211,7 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
   const [connectVerifySsl, setConnectVerifySsl] = useState(true)
   const [connectModel, setConnectModel] = useState('')
   const [fetchedModels, setFetchedModels] = useState<ModelInfo[]>([])
+  const [audioSettings, setAudioSettings] = useState<{ transcribe_model: string; transcribe_models: import('../../electron/aiAudioTypes').TranscribeModel[] }>({ transcribe_model: '', transcribe_models: [] })
 
   // Telemetry & Test State
   const [isFetchingModels, setIsFetchingModels] = useState(false)
@@ -217,6 +219,7 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
   const [isSaving, setIsSaving] = useState(false)
   const [testResult, setTestResult] = useState<TestConnectionResult | null>(null)
   const [formError, setFormError] = useState('')
+  const editingProvider = savedProviders.find((provider) => provider.id === connectId)
 
   // Filter popular catalog to only show providers that are NOT already connected
   const availablePopularPresets = SUPPORTED_CATALOG.filter((preset) => {
@@ -231,6 +234,7 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
       setSavedProviders(stored)
       return stored
     } catch {
+      setFormError('Could not load your provider settings. Please try again.')
       return []
     }
   }
@@ -245,6 +249,7 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
       setConnectingPreset(null)
       setFormError('')
       setTestResult(null)
+      setConnectApiKey('')
     }
   }
 
@@ -254,7 +259,7 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
     let subscribed = true
     getAllStoredProviders().then(
       (stored) => { if (subscribed) setSavedProviders(stored) },
-      () => undefined,
+      () => { if (subscribed) setFormError('Could not load your provider settings. Please try again.') },
     )
     return () => { subscribed = false }
   }, [isOpen])
@@ -275,6 +280,7 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
       setConnectBaseUrl(existing ? (existing.base_url || '') : (preset.defaultBaseUrl || ''))
     }
     setConnectProtocol(existing ? existing.provider_type : preset.providerType)
+    setAudioSettings({ transcribe_model: existing?.transcribe_model || '', transcribe_models: existing?.transcribe_models || [] })
     setConnectApiKey('')
     setConnectVerifySsl(existing?.verify_ssl ?? true)
     const isOpenRouter = preset.id === 'openrouter'
@@ -523,6 +529,7 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
               ? modelsToSave[0].id
               : existing?.selected_model || 'default')
       const configToSave: ClientProviderConfig & { set_active?: boolean } = {
+        ...(connectProtocol === 'gemini' ? audioSettings : {}),
         id: connectId.trim(),
         name: connectName.trim() || connectId.trim(),
         provider_type: connectProtocol,
@@ -534,12 +541,13 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
         set_active: true,
       }
 
-      await saveStoredProvider(configToSave)
+      const saved = await saveStoredProvider(configToSave)
+      setConnectApiKey('')
       await refreshData()
       setConnectingPreset(null)
       onProviderChanged?.()
       window.dispatchEvent(new CustomEvent('promptguard:providers-updated'))
-      onClose()
+      if (!saved.storage_message) onClose()
     } catch (err) {
       setFormError(`Connection failed: ${errorMessage(err) || err}`)
     } finally {
@@ -705,7 +713,7 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
                 {/* API Key / Token */}
                 <div className="oc-form-group">
                   <div className="oc-label-row">
-                    <label className="oc-label">{connectingPreset.id === 'cloudflare' ? 'API Token' : 'API Key'}</label>
+                    <label className="oc-label" htmlFor="provider-api-key">{connectingPreset.id === 'cloudflare' ? 'API Token' : 'API Key'}</label>
                     <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                       {connectingPreset.id === 'cloudflare' ? (
                         <a
@@ -728,6 +736,7 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
                     </div>
                   </div>
                   <input
+                    id="provider-api-key"
                     type={showApiKey ? 'text' : 'password'}
                     className="oc-input oc-input--mono"
                     placeholder={
@@ -747,7 +756,13 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
                     onChange={(e) => setConnectApiKey(e.target.value)}
                     autoComplete="off"
                     spellCheck={false}
+                    aria-describedby={editingProvider?.storage_message ? 'provider-key-status' : undefined}
                   />
+                  {editingProvider?.storage_message ? (
+                    <p id="provider-key-status" className="oc-hint-text" role="status">{editingProvider.storage_message}</p>
+                  ) : editingProvider?.has_key ? (
+                    <p className="oc-hint-text">Leave the API key empty to keep your current key.</p>
+                  ) : null}
                 </div>
 
                 {/* SSL Checkbox */}
@@ -831,6 +846,11 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
                 ) : null}
 
                 {/* Form Footer Actions */}
+                {connectProtocol === 'gemini' ? <AudioTranscribeSettings key={connectId} config={{
+                  id: connectId, name: connectName, provider_type: connectProtocol,
+                  api_key: connectApiKey.trim() || undefined, verify_ssl: connectVerifySsl,
+                  ...audioSettings,
+                }} onChange={setAudioSettings} /> : null}
                 <div className="oc-form-footer">
                   <button
                     type="button"
@@ -854,6 +874,12 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
           ) : (
             /* MAIN PROVIDERS LIST VIEW (MATCHING SCREENSHOT 1 & 4) */
             <div className="oc-providers-view">
+              {formError ? <div className="oc-alert oc-alert--error" role="alert">{formError}</div> : null}
+              {savedProviders.filter((provider) => provider.storage_message).map((provider) => (
+                <div key={provider.id} className="oc-alert" role="status">
+                  <strong>{provider.name}: </strong>{provider.storage_message}
+                </div>
+              ))}
               {/* Connected Providers */}
               {savedProviders.length > 0 ? (
                 <div className="oc-section">
@@ -870,7 +896,7 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
                             <div className="oc-provider-details">
                               <div className="oc-provider-name-row">
                                 <span className="oc-provider-name">{provider.name}</span>
-                                <span className="oc-badge">API key</span>
+                                <span className="oc-badge">{provider.key_storage === 'session' ? 'Session only' : provider.key_storage === 'unavailable' ? 'Key unavailable' : provider.has_key ? 'API key' : 'Enter API key'}</span>
                                 {isActive ? (
                                   <span className="oc-badge oc-badge--active">Active</span>
                                 ) : null}
@@ -885,6 +911,17 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
                             </div>
                           </div>
                           <div className="oc-row-actions">
+                            <button
+                              type="button"
+                              className="oc-btn-connect lg-host"
+                              onClick={() => handleOpenConnect(SUPPORTED_CATALOG.find((preset) => preset.id === provider.id) || {
+                                id: provider.id, name: provider.name, providerType: provider.provider_type,
+                                defaultBaseUrl: provider.base_url, description: 'Update this provider.', isCustom: true,
+                              })}
+                            >
+                              <PillGlass />
+                              Edit
+                            </button>
                             {!isActive ? (
                               <button
                                 type="button"
@@ -912,6 +949,16 @@ export function ProviderSettingsModal({ isOpen, onClose, onProviderChanged }: Pr
               ) : null}
 
               {/* Popular Providers (Only shows un-connected providers) */}
+              <section className="oc-section" aria-label="Audio Providers">
+                <h2 className="oc-section-title">Audio Providers</h2>
+                {savedProviders.some((provider) => provider.provider_type === 'gemini') ? savedProviders.filter((provider) => provider.provider_type === 'gemini').map((provider) => (
+                  <AudioTranscribeSettings key={provider.id} config={provider} onChange={async (audio) => {
+                    await saveStoredProvider({ ...provider, ...audio })
+                    await refreshData()
+                    window.dispatchEvent(new CustomEvent('promptguard:providers-updated'))
+                  }} />
+                )) : <p className="oc-hint-text">Connect Google Gemini below to enable live voice input using the same API key.</p>}
+              </section>
               {availablePopularPresets.length > 0 ? (
                 <div className="oc-section">
                   <h2 className="oc-section-title">Popular providers</h2>

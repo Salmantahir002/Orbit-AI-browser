@@ -1,4 +1,6 @@
-import { useState, type FormEvent, type MouseEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from 'react'
+import { Globe, Info, SlidersHorizontal, TriangleAlert } from 'lucide-react'
+import type { ConnectionInfo } from '../../electron/browserUITypes'
 import { normalizeUrl } from '../services/urlUtils'
 import { BrowserLogo } from './BrowserLogo'
 import { LiquidGlass } from './LiquidGlass'
@@ -7,6 +9,8 @@ type BrowserToolbarProps = {
   addressValue: string
   assistantOpen: boolean
   currentUrl: string
+  connection: ConnectionInfo
+  onConnectionOpen: (event: MouseEvent<HTMLButtonElement>) => void
   isLoading: boolean
   isScanning: boolean
   isBookmarked?: boolean
@@ -21,6 +25,8 @@ type BrowserToolbarProps = {
   onToggleBookmark?: () => void
   onMenuOpen: (event: MouseEvent<HTMLButtonElement>) => void
   menuOpen: boolean
+  /** Marks the menu button while a newer Orbit is waiting: 'ready' once it is downloaded. */
+  pendingUpdate: 'available' | 'ready' | null
   activeDownloads: number
   onDownloadsOpen: () => void
 }
@@ -57,15 +63,6 @@ function StopIcon() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <line x1="18" y1="6" x2="6" y2="18" />
       <line x1="6" y1="6" x2="18" y2="18" />
-    </svg>
-  )
-}
-
-function SearchMagnifierIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="11" cy="11" r="8" />
-      <line x1="21" y1="21" x2="16.65" y2="16.65" />
     </svg>
   )
 }
@@ -107,6 +104,8 @@ function BraveMenuIcon() {
 
 export function BrowserToolbar({
   addressValue,
+  connection,
+  onConnectionOpen,
   assistantOpen,
   isLoading,
   isScanning,
@@ -122,10 +121,28 @@ export function BrowserToolbar({
   onToggleBookmark,
   onMenuOpen,
   menuOpen,
+  pendingUpdate,
   activeDownloads,
   onDownloadsOpen,
 }: BrowserToolbarProps) {
   const [errorMessage, setErrorMessage] = useState('')
+  const connectionButton = useRef<HTMLButtonElement>(null)
+  const warning = ['http', 'insecure', 'certificate-error', 'unavailable'].includes(connection.status)
+  const connectionLabel = connection.status === 'certificate-error' ? 'Certificate error' : warning ? 'Not secure' : connection.status === 'encrypted' ? 'Site controls: connection is encrypted' : connection.status === 'internal' ? 'Site information' : 'Checking connection'
+  useEffect(() => {
+    const button = connectionButton.current
+    if (!button) return
+    const update = () => {
+      const rect = button.getBoundingClientRect()
+      void window.electronAPI?.browserUI.siteAnchor({ x: rect.left, y: rect.bottom + 10 }).catch(() => undefined)
+    }
+    const observer = new ResizeObserver(update)
+    observer.observe(button)
+    window.addEventListener('resize', update)
+    update()
+    return () => { observer.disconnect(); window.removeEventListener('resize', update) }
+  }, [])
+  const menuLabel = pendingUpdate === 'ready' ? 'Customize and control browser (restart to update)' : pendingUpdate === 'available' ? 'Customize and control browser (update available)' : 'Customize and control browser'
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -160,9 +177,10 @@ export function BrowserToolbar({
       </nav>
 
       <form className="address-form" onSubmit={handleSubmit}>
-        <span className="omnibox-search-icon" aria-hidden="true">
-          <SearchMagnifierIcon />
-        </span>
+        <button ref={connectionButton} type="button" className={`site-connection-button${warning ? ' site-connection-warning' : ''}`} data-connection={connection.status} aria-label={connectionLabel} title={connectionLabel} aria-haspopup="dialog" onClick={onConnectionOpen}>
+          {warning ? <TriangleAlert aria-hidden="true" /> : connection.status === 'encrypted' ? <SlidersHorizontal aria-hidden="true" /> : connection.status === 'internal' ? <Globe aria-hidden="true" /> : <Info aria-hidden="true" />}
+          {warning ? <span>{connection.status === 'certificate-error' ? 'Certificate error' : 'Not secure'}</span> : null}
+        </button>
         <input
           aria-label="Address and search bar"
           className="address-input"
@@ -222,13 +240,14 @@ export function BrowserToolbar({
         <button
           className="brave-menu-btn"
           type="button"
-          aria-label="Customize and control browser"
-          title="Customize and control browser"
+          aria-label={menuLabel}
+          title={menuLabel}
           aria-haspopup="menu"
           aria-expanded={menuOpen}
           onClick={onMenuOpen}
         >
           <BraveMenuIcon />
+          {pendingUpdate ? <span className={`toolbar-update-badge toolbar-update-badge--${pendingUpdate}`} aria-hidden="true" /> : null}
         </button>
       </div>
 

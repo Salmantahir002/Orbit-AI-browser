@@ -3,6 +3,99 @@ dist/
 build/
 .env
 
+# Local environment overrides (keep setup templates available to contributors)
+.env.*
+!.env.example
+!.env.*.example
+!.env.sample
+!.env.*.sample
+!.env.template
+!.env.*.template
+
+# Runtime logs and package-manager diagnostics
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Rebuildable compiler/tool caches and test coverage
+*.tsbuildinfo
+.cache/
+.vite/
+.vite-temp/
+.vitest/
+.eslintcache
+.npm/
+coverage/
+.nyc_output/
+
+# Machine-specific editor/OS files and temporary backups
+.idea/
+.vscode/settings.json
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.suo
+*.user
+*.swp
+*.swo
+*.tmp
+*.temp
+*.bak
+*~
+
+# Orbit runtime state, if a local/test profile is placed inside the checkout
+browser-profile.json
+provider_settings.json
+runtime-versions.json
+
+# Local agent configuration and project tooling
+.codegraph/
+.claude/
+.agents/
+.mcp.json
+AGENTS.md
+CLAUDE.md
+download_planets.ps1
+skills-lock.json
+table_of_content.md
+
+# Local documentation and frontend test files/reports
+/docs/
+/frontend/e2e/
+/frontend/playwright-report/
+/frontend/test/
+/frontend/test-results/
+
+# Standalone local architecture presentation and mascot showcase tools
+/architecture.html
+/frontend/kimo-preview.html
+/frontend/kimo-shoot.mjs
+/frontend/src/kimo-preview.tsx
+/frontend/src/components/KimoPreviewGallery.tsx
+/kimo-*.png
+/frontend/kimo-*.png
+
+# Orbit installer sources, packaging configuration, and release automation
+/installer/
+/frontend/electron-builder.yml
+/frontend/scripts/stage-backend.mjs
+/.github/workflows/release.yml
+/.github/workflows/electron-update.yml
+
+# Generated Orbit packages and installer/update artifacts
+/frontend/release/
+/frontend/dist-electron/
+Orbit-Setup-*
+*.blockmap
+latest*.yml
+builder-debug.yml
+builder-effective-config.yaml
+win-unpacked/
+
 # Model weights — ~1.1 GB, far past any sensible git limit. Re-fetch with the
 # commands in backend-node/dl_models/prompt_injection_model/SOURCE.md.
 backend-node/dl_models/**/*.onnx

@@ -1,8 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import { RUNTIME_INVOKE_CHANNEL } from './browserRuntime/runtimeContract.js'
-import type { BrowserUIBridge, BrowserSnapshot, OverlayState, BrowserCommand, DownloadEntry } from './browserUITypes.js'
-import type { ClientProviderView, ProviderSaveRequest } from './providerSecureStore.js'
+import type { BrowserUIBridge, BrowserSnapshot, OverlayState, BrowserCommand, DownloadEntry, UpdateState, ConnectionInfo } from './browserUITypes.js'
+import type { ClientProviderView, ProviderSaveRequest, ProviderConnectionResult } from './providerSecureStore.js'
 
 function subscribe<T>(channel: string, listener: (value: T) => void) {
   const handler = (_event: IpcRendererEvent, payload: T) => listener(payload)
@@ -15,6 +15,10 @@ const browserUI: BrowserUIBridge = {
   show: (panel, targetId, anchor) => ipcRenderer.invoke('browser-ui:show', panel, targetId, anchor),
   close: () => ipcRenderer.invoke('browser-ui:close'),
   ready: () => ipcRenderer.send('browser-ui:ready'),
+  siteAnchor: (point) => ipcRenderer.invoke('browser-ui:site-anchor', point),
+  decidePermission: (id, allow) => ipcRenderer.invoke('browser-ui:permission-decision', id, allow),
+  connection: (id) => ipcRenderer.invoke('browser-ui:connection', id),
+  onConnection: (listener) => subscribe<{ targetId: number; connection: ConnectionInfo }>('browser-ui:connection', listener),
   command: (command, url) => ipcRenderer.invoke('browser-ui:command', command, url),
   newWindow: () => ipcRenderer.invoke('browser-ui:new-window'),
   closeWindow: () => ipcRenderer.invoke('browser-ui:close-window'),
@@ -31,12 +35,17 @@ const browserUI: BrowserUIBridge = {
   chooseDownloadFolder: () => ipcRenderer.invoke('browser-ui:choose-folder'),
   openDownloadFolder: () => ipcRenderer.invoke('browser-ui:open-folder'),
   downloadAction: (id, action) => ipcRenderer.invoke('browser-ui:download-action', id, action),
+  updateState: () => ipcRenderer.invoke('browser-ui:update-state'),
+  checkForUpdates: () => ipcRenderer.invoke('browser-ui:update-check'),
+  downloadUpdate: () => ipcRenderer.invoke('browser-ui:update-download'),
+  installUpdate: () => ipcRenderer.invoke('browser-ui:update-install'),
+  onUpdate: (listener) => subscribe<UpdateState>('browser-ui:update', listener),
   onSnapshot: (listener) => subscribe<BrowserSnapshot>('browser-ui:snapshot', listener),
   onDownload: (listener) => subscribe<DownloadEntry>('browser-ui:download', listener),
-  onOverlay: (listener) => subscribe<OverlayState>('browser-ui:overlay', listener),
+  onOverlay: (listener) => subscribe<OverlayState | null>('browser-ui:overlay', listener),
   onCommand: (listener) => subscribe<{ command: BrowserCommand; url?: string }>('browser-ui:command', listener),
   onVisibility: (listener) => subscribe<boolean>('browser-ui:visibility', listener),
-  onRestoreFocus: (listener) => subscribe<void>('browser-ui:restore-focus', listener),
+  onRestoreFocus: (listener) => subscribe<'site' | 'menu'>('browser-ui:restore-focus', listener),
 }
 
 /** Mirrors the shape main.ts sends over 'browser:tab-event' (see BrowserTabEvent in src/vite-env.d.ts). */
@@ -54,6 +63,18 @@ type BrowserTabEvent = {
 // The bridge exposes one purpose-built function per IPC channel. There is deliberately no
 // generic `invoke(channel)`: the renderer can only reach what is listed here.
 const electronAPI = {
+  aiAudio: {
+    fetchModels: (config: ProviderSaveRequest) => ipcRenderer.invoke('ai-audio:models', config),
+    testConnection: (config: ProviderSaveRequest) => ipcRenderer.invoke('ai-audio:test', config),
+    start: (id: string) => ipcRenderer.invoke('ai-audio:start', id) as Promise<void>,
+    send: (id: string, pcm: ArrayBuffer) => ipcRenderer.send('ai-audio:chunk', id, pcm),
+    stop: (id: string, cancel?: boolean) => ipcRenderer.invoke('ai-audio:stop', id, cancel) as Promise<void>,
+    onEvent: (listener: (event: import('./aiAudioTypes.js').AudioEvent) => void) => {
+      const handler = (_event: IpcRendererEvent, value: import('./aiAudioTypes.js').AudioEvent) => listener(value)
+      ipcRenderer.on('ai-audio:event', handler)
+      return () => ipcRenderer.removeListener('ai-audio:event', handler)
+    },
+  } satisfies import('./aiAudioTypes.js').AiAudioBridge,
   browserUI,
   scanWebview: (webContentsId: number) => ipcRenderer.invoke('security:scan-webview', webContentsId) as Promise<unknown>,
   runtimeInvoke: (request: unknown) => ipcRenderer.invoke(RUNTIME_INVOKE_CHANNEL, request) as Promise<unknown>,
@@ -106,6 +127,8 @@ const electronAPI = {
   },
   // Secure Provider Storage APIs
   providers: {
+    fetchModels: (config: ProviderSaveRequest) => ipcRenderer.invoke('providers:models', config) as Promise<NonNullable<ClientProviderView['models']>>,
+    testConnection: (config: ProviderSaveRequest) => ipcRenderer.invoke('providers:test', config) as Promise<ProviderConnectionResult>,
     getAll: () => ipcRenderer.invoke('providers:get-all') as Promise<ClientProviderView[]>,
     save: (config: ProviderSaveRequest) => ipcRenderer.invoke('providers:save', config) as Promise<ClientProviderView>,
     delete: (providerId: string) => ipcRenderer.invoke('providers:delete', providerId) as Promise<{ ok: boolean }>,

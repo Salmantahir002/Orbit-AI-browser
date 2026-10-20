@@ -326,12 +326,11 @@ npm run test:e2e
 cd frontend
 npm run build
 
-# Package standalone Windows installer (NSIS executable)
-cd frontend
-npm run package
+# Build the Windows installer (installer/dist/Orbit-Setup-<version>.exe)
+node installer/build.mjs          # from the repository root; `npm run package` in frontend/ does the same
 ```
 
-The packaging configuration (`frontend/electron-builder.yml`) bundles the compiled Node backend inside `resources/backend` and runs it using Electron's bundled Node runtime (`ELECTRON_RUN_AS_NODE=1`), requiring zero external Node.js installation on end-user machines. `npm run package` first runs `npm run package:stage` (`frontend/scripts/stage-backend.mjs`), which copies only the backend's production dependencies and this platform's onnxruntime binary into `frontend/build/backend`; that staged copy, not `backend-node/node_modules`, is what ships.
+The installer has its own folder, `installer/` (see `installer/README.md`): the setup wizard, its icons and license, and the build script. It ships the deep-learning detection model (Llama Prompt Guard 2) with its license, fetching the weights on a fresh clone, so installed copies run both detectors. The app's packaging configuration (`frontend/electron-builder.yml`) bundles the compiled Node backend inside `resources/backend` and runs it using Electron's bundled Node runtime (`ELECTRON_RUN_AS_NODE=1`), requiring zero external Node.js installation on end-user machines. The build first runs `npm run package:stage` (`frontend/scripts/stage-backend.mjs`), which copies only the backend's production dependencies and this platform's onnxruntime binary into `frontend/build/backend`; that staged copy, not `backend-node/node_modules`, is what ships.
 
 ---
 

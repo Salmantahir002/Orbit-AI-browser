@@ -17,6 +17,8 @@ import {
 
 import { providerSecureStore, type ProviderSaveRequest } from './providerSecureStore.js'
 import { BrowserUIController } from './browserUIController.js'
+import { BrowserUpdater } from './browserUpdater.js'
+import { GeminiLiveAudio } from './geminiLiveAudio.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -33,6 +35,11 @@ app.commandLine.appendSwitch('disk-cache-size', '0')
 const browserWindows = new Map<number, BrowserWindow>()
 const tabOwners = new Map<number, BrowserWindow>()
 let browserUI: BrowserUIController
+const aiAudio = new GeminiLiveAudio({
+  windowFor: (contents) => browserWindows.get(contents.id),
+  allowed: () => browserUI.profile.settings.allowAiMicrophone,
+  setAllowed: (allowAiMicrophone) => browserUI.profile.updateSettings({ allowAiMicrophone }),
+})
 const cdpSessionRegistry = new CdpSessionRegistry()
 const cdpInspectionService = new CdpInspectionService()
 // The runtime borrows the CDP collector as a sensor, but the agent's scan
@@ -167,6 +174,7 @@ function attachGuestBehaviour(view: WebContentsView, mainWindow: BrowserWindow) 
   // runtime. Electron permits only a single debugger attachment per
   // webContents, so neither consumer may attach on its own.
   const cdpSession = cdpSessionRegistry.attach(contents)
+  browserUI.attachSiteControls(contents, cdpSession)
   if (cdpSession) {
     cdpInspectionService.watch(cdpSession)
     browserRuntime.registerTarget(cdpSession)
@@ -190,9 +198,9 @@ function attachGuestBehaviour(view: WebContentsView, mainWindow: BrowserWindow) 
   contents.on('page-title-updated', (_event, title) => {
     sendTabEvent(id, { type: 'page-title-updated', title })
   })
-  contents.on('did-fail-load', (_event, errorCode, errorDescription) => {
-    if (errorCode === -3) return // aborted by a subsequent navigation, not a real failure
-    sendTabEvent(id, { type: 'did-fail-load', errorCode, errorDescription })
+  contents.on('did-fail-load', (_event, errorCode, errorDescription, url, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return // subframe errors and aborted navigations do not replace the document
+    sendTabEvent(id, { type: 'did-fail-load', errorCode, errorDescription, url })
   })
 }
 
@@ -472,19 +480,30 @@ ipcMain.handle(RUNTIME_INVOKE_CHANNEL, (event, payload: unknown): Promise<Runtim
 })
 
 // LLM Provider Credentials & Configuration IPC
+function requireAudioShell(event: IpcMainInvokeEvent | IpcMainEvent) {
+  if (!requireShell(event)) throw new Error('Audio features are only available in the Orbit shell.')
+}
+ipcMain.handle('ai-audio:models', (event, config: ProviderSaveRequest) => { requireAudioShell(event); return aiAudio.fetchModels(config) })
+ipcMain.handle('ai-audio:test', (event, config: ProviderSaveRequest) => { requireAudioShell(event); return aiAudio.testConnection(config) })
+ipcMain.handle('ai-audio:start', (event, id: string) => { requireAudioShell(event); return aiAudio.start(event.sender, id) })
+ipcMain.on('ai-audio:chunk', (event, id: string, pcm: unknown) => { if (requireShell(event)) aiAudio.send(event.sender, id, pcm) })
+ipcMain.handle('ai-audio:stop', (event, id: string, cancel: boolean) => { requireAudioShell(event); return aiAudio.stop(event.sender, id, cancel === true) })
 ipcMain.handle('providers:get-all', () => {
   return providerSecureStore.getAllProviders()
 })
 
 ipcMain.handle('providers:save', async (_event, payload: ProviderSaveRequest) => {
+  aiAudio.revoke()
   const result = providerSecureStore.saveProvider(payload)
-  if (payload.set_active) {
-    await providerSecureStore.syncWithBackend()
-  }
+  await providerSecureStore.syncWithBackend()
   return result
 })
 
+ipcMain.handle('providers:models', (_event, payload: ProviderSaveRequest) => providerSecureStore.fetchModels(payload))
+ipcMain.handle('providers:test', (_event, payload: ProviderSaveRequest) => providerSecureStore.testConnection(payload))
+
 ipcMain.handle('providers:delete', async (_event, providerId: string) => {
+  aiAudio.revoke()
   const success = providerSecureStore.deleteProvider(providerId)
   await providerSecureStore.syncWithBackend()
   return { ok: success }
@@ -502,6 +521,9 @@ ipcMain.handle('providers:get-active', () => {
 })
 
 app.whenReady().then(async () => {
+  // The backend runs as a second Orbit.exe holding native modules open, so it is stopped before an
+  // update's installer runs, and started again if the installer could not be launched.
+  const updater = new BrowserUpdater({ beforeInstall: () => stopBackend(), installFailed: () => { void startBackend() } })
   browserUI = new BrowserUIController({
     createWindow: () => createWindow(true),
     getTarget: (window, id) => tabOwners.get(id) === window ? tabViews.get(id) ?? null : null,
@@ -509,6 +531,21 @@ app.whenReady().then(async () => {
       if (isDevelopment) await contents.loadURL('http://localhost:5173?surface=browser-overlay')
       else await contents.loadFile(path.join(__dirname, '../dist/index.html'), { query: { surface: 'browser-overlay' } })
     },
+    updater,
+  })
+  browserUI.profile.onMicrophoneRevoked = () => {
+    aiAudio.revoke()
+    for (const window of browserWindows.values()) if (!window.isDestroyed()) window.webContents.send('ai-audio:event', { sessionId: '*', type: 'revoked' })
+  }
+  browserUI.permissions.aiMicrophone = {
+    owns: (contents) => browserWindows.has(contents.id),
+    check: (contents) => aiAudio.check(contents),
+    request: (contents) => aiAudio.request(contents),
+  }
+  app.on('web-contents-created', (_event, contents) => {
+    contents.on('render-process-gone', () => aiAudio.detach(contents))
+    contents.on('did-start-navigation', (event) => { if (event.isMainFrame && !event.isSameDocument) aiAudio.detach(contents) })
+    contents.once('destroyed', () => aiAudio.detach(contents))
   })
   // Packaged / e2e runs have no concurrently wrapper — bring the backend up here. The window
   // does not wait for it: nothing on the welcome screen needs the backend, and every
@@ -516,6 +553,7 @@ app.whenReady().then(async () => {
   const backendReady = startBackend()
 
   await createWindow()
+  updater.start()
 
   // Push the saved active provider to the backend as soon as it answers /health.
   backendReady
@@ -532,7 +570,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('will-quit', () => {
-  stopBackend()
+  void stopBackend()
 })
 
 app.on('window-all-closed', () => {

@@ -14,22 +14,6 @@ type BookmarkBarProps = {
 }
 
 
-function AppsGridIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14" aria-hidden="true">
-      <rect x="4" y="4" width="4" height="4" rx="1" />
-      <rect x="10" y="4" width="4" height="4" rx="1" />
-      <rect x="16" y="4" width="4" height="4" rx="1" />
-      <rect x="4" y="10" width="4" height="4" rx="1" />
-      <rect x="10" y="10" width="4" height="4" rx="1" />
-      <rect x="16" y="10" width="4" height="4" rx="1" />
-      <rect x="4" y="16" width="4" height="4" rx="1" />
-      <rect x="10" y="16" width="4" height="4" rx="1" />
-      <rect x="16" y="16" width="4" height="4" rx="1" />
-    </svg>
-  )
-}
-
 function GlobeIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="13" height="13" aria-hidden="true">
@@ -206,18 +190,6 @@ export const BookmarkBar = memo(function BookmarkBar({
       role="toolbar"
       aria-label="Bookmarks bar"
     >
-      <div className="bookmark-bar-fixed-left">
-        <button
-          className="bookmark-app-btn"
-          type="button"
-          title="Apps"
-          aria-label="Chrome Apps"
-        >
-          <AppsGridIcon />
-        </button>
-        <div className="bookmark-divider" aria-hidden="true" />
-      </div>
-
       <div className="bookmark-items-container">
         {bookmarks.length === 0 ? (
           <div className="bookmark-empty-hint">

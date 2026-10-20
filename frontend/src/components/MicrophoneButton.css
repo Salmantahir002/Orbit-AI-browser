@@ -1,0 +1,14 @@
+.ai-mic-button { min-width: 44px; min-height: 44px; flex-shrink: 0; cursor: pointer; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: 50%; color: inherit; background: transparent; }
+.prompt-icon-btn.ai-mic-button.ai-mic-button--active, .prompt-icon-btn.ai-mic-button.ai-mic-button--active:hover { color: var(--danger, #ff8e96); background: color-mix(in srgb, var(--danger, #ff8e96) 15%, transparent); animation: ai-mic-pulse 1.4s ease-in-out infinite; }
+.ai-mic-button:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.ai-mic-button:disabled { cursor: default; opacity: .6; }
+.ai-mic-status { color: inherit; font-size: 12px; line-height: 1.5; margin: 6px 10px; overflow-wrap: anywhere; }
+.ai-mic-error { color: var(--danger, #ff8e96); }
+.ai-audio-settings { border: 1px solid color-mix(in srgb, currentColor 16%, transparent); border-radius: 14px; padding: 16px; display: grid; gap: 12px; }
+.ai-audio-settings h3, .ai-audio-settings p { margin: 0; }
+.ai-audio-settings h3 { font-size: 14px; font-weight: 600; line-height: 1.4; }
+.ai-audio-settings > .oc-badge { justify-self: start; }
+.ai-audio-settings .oc-action-row { flex-wrap: wrap; }
+.ai-audio-settings p { font-size: 12px; line-height: 1.5; }
+@keyframes ai-mic-pulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger, #ff8e96) 18%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .prompt-icon-btn.ai-mic-button.ai-mic-button--active, .prompt-icon-btn.ai-mic-button.ai-mic-button--active:hover { animation: none; } }

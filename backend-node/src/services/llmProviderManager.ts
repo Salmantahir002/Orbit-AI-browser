@@ -59,7 +59,12 @@ export class LlmProviderManager {
 
   /** Fetch live models for a candidate configuration without activating it. */
   async listModelsForConfig(config: ProviderConfig): Promise<ModelInfo[]> {
-    return createGateway(config).listModels()
+    try {
+      return await createGateway(config).listModels()
+    } catch {
+      // Provider responses and network errors can echo credentials.
+      throw new Error('Could not fetch models. Check your API key and connection.')
+    }
   }
 
   /**
@@ -78,14 +83,14 @@ export class LlmProviderManager {
         models: models.map((m) => ({ id: m.id, name: m.name })),
         message: `Connected successfully in ${elapsedMs}ms (${models.length} models available)`,
       }
-    } catch (exc) {
+    } catch {
       const elapsedMs = Math.round((performance.now() - start) * 10) / 10
       return {
         success: false,
         latency_ms: elapsedMs,
         models_count: 0,
         models: [],
-        message: exc instanceof Error ? exc.message : String(exc),
+        message: 'Could not connect to the provider. Check your API key and connection.',
       }
     }
   }
@@ -188,10 +193,9 @@ export class LlmProviderManager {
           model: result.model,
           usage: { prompt_tokens: result.usage.prompt_tokens, completion_tokens: result.usage.completion_tokens },
         }
-      } catch (exc) {
-        const message = exc instanceof Error ? exc.message : String(exc)
+      } catch {
         return {
-          response: `LLM provider error (${this.activeConfig.name}): ${message}. Please check your connection or API key in Settings.`,
+          response: `LLM provider error (${this.activeConfig.name}). Check your connection and API key in Settings.`,
           model: `${this.activeConfig.name} (error)`,
           usage: { prompt_tokens: 0, completion_tokens: 0 },
         }
@@ -212,8 +216,12 @@ export class LlmProviderManager {
     const targetModel = model || this.activeConfig?.selected_model || (isOpenRouter ? 'openrouter/auto' : undefined)
 
     if (this.activeGateway && this.activeConfig && this.activeConfig.api_key) {
-      const result = await this.activeGateway.chatCompletion(messages, { model: targetModel, temperature, maxTokens })
-      return result.response
+      try {
+        const result = await this.activeGateway.chatCompletion(messages, { model: targetModel, temperature, maxTokens })
+        return result.response
+      } catch {
+        throw new Error('Could not contact the planning provider. Check your API key and connection.')
+      }
     }
 
     throw new Error(

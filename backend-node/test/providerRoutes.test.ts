@@ -16,7 +16,9 @@ afterAll(async () => {
 })
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   llmProviderManager.clearActiveProvider()
+  llmProviderManager.setConfiguredProviders([])
 })
 
 it('GET /providers/presets returns the 12 presets in order', async () => {
@@ -90,6 +92,46 @@ it('POST /providers/test reports the connection result', async () => {
 })
 
 describe('active provider lifecycle', () => {
+  it('uses runtime-only credentials for models, tests, chat and planning while readback stays masked', async () => {
+    const key = 'sk-runtime-session-only-regression'
+    const authorization: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      authorization.push(new Headers(init?.headers).get('Authorization') || '')
+      return Response.json(url.endsWith('/models') ? { data: [{ id: 'test-model', object: 'model' }] } : {
+        choices: [{ message: { content: 'Runtime key accepted' } }], model: 'test-model',
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      })
+    }))
+    const config = { id: 'openai', name: 'OpenAI', api_key: key, selected_model: 'test-model' }
+    for (const endpoint of ['models', 'test', 'active']) {
+      const result = await app.inject({ method: 'POST', url: `${PREFIX}/providers/${endpoint}`, payload: config })
+      expect(result.statusCode).toBe(200)
+      expect(result.body).not.toContain(key)
+    }
+    expect((await llmProviderManager.chat({ prompt: 'Hello' })).response).toBe('Runtime key accepted')
+    expect(await llmProviderManager.planChat({ messages: [{ role: 'user', content: 'Plan a task' }] })).toBe('Runtime key accepted')
+    expect(authorization).toHaveLength(4)
+    expect(authorization.every((value) => value === `Bearer ${key}`)).toBe(true)
+    const readback = await app.inject({ method: 'GET', url: `${PREFIX}/providers/active` })
+    expect(readback.json().masked_key).toContain('••••')
+    expect(readback.body).not.toContain(key)
+    expect(readback.json()).not.toHaveProperty('api_key')
+  })
+
+  it('does not echo credentials from provider failures into model, test, chat or planning errors', async () => {
+    const key = 'sk-credential-echo-regression'
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(`Provider rejected ${key}`, { status: 400 })))
+    const config = { id: 'openai', name: 'OpenAI', api_key: key, selected_model: 'test-model' }
+    for (const endpoint of ['models', 'test']) {
+      const result = await app.inject({ method: 'POST', url: `${PREFIX}/providers/${endpoint}`, payload: config })
+      expect(result.body).not.toContain(key)
+      expect(result.body).toContain('Check your API key and connection')
+    }
+    await app.inject({ method: 'POST', url: `${PREFIX}/providers/active`, payload: config })
+    expect((await llmProviderManager.chat({ prompt: 'Hello' })).response).not.toContain(key)
+    await expect(llmProviderManager.planChat({ messages: [] })).rejects.toThrow('Could not contact the planning provider')
+  })
+
   it('set, get, then clear', async () => {
     const setRes = await app.inject({
       method: 'POST',

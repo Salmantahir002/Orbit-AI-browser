@@ -5,20 +5,35 @@ import { existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { BrowserProfileStore, isBrowserUrl } from './browserProfileStore.js'
+import type { BrowserUpdater } from './browserUpdater.js'
+import { SitePermissions } from './sitePermissions.js'
+import { SiteConnection, initialConnection } from './siteConnection.js'
+import type { CdpSession } from './browserRuntime/cdpSession.js'
 import { ZOOM_LEVELS, type BrowserCommand, type BrowserPanel, type ClearDataRequest, type DownloadEntry, type OverlayState } from './browserUITypes.js'
 
-type WindowSurface = { window: BrowserWindow; overlay: WebContentsView; ready: boolean; state: OverlayState | null; activeTarget: number | null }
+type WindowSurface = { window: BrowserWindow; overlay: WebContentsView; ready: boolean; state: OverlayState | null; activeTarget: number | null; siteAnchor: { x: number; y: number } }
 type ControllerOptions = {
   createWindow: () => Promise<void>
   loadOverlay: (contents: WebContents) => Promise<void>
   getTarget: (window: BrowserWindow, id: number) => WebContentsView | null
+  updater: BrowserUpdater
 }
-const PANELS: BrowserPanel[] = ['menu', 'history', 'downloads', 'bookmarks', 'clear-data', 'settings', 'about']
+const PANELS: BrowserPanel[] = ['menu', 'history', 'downloads', 'bookmarks', 'clear-data', 'settings', 'about', 'connection']
 const COMMANDS: BrowserCommand[] = ['new-tab', 'bookmark-page', 'toggle-bookmarks', 'focus-address', 'close-tab', 'next-tab', 'previous-tab', 'provider-settings']
 
 /** A transparent native view paints browser chrome above guest pages without hiding or unloading them. */
 export class BrowserUIController {
   readonly profile = new BrowserProfileStore()
+  readonly permissions = new SitePermissions((prompt) => {
+    const surface = [...this.surfaces.values()].find((entry) => entry.activeTarget === prompt.targetId && this.options.getTarget(entry.window, prompt.targetId))
+    if (!surface?.ready || surface.window.isDestroyed() || surface.state?.panel === 'permission') return false
+    this.show(surface, 'permission', prompt.targetId, surface.siteAnchor, { permission: prompt })
+    return true
+  }, (prompt) => {
+    const surface = [...this.surfaces.values()].find((entry) => entry.state?.permission?.id === prompt.id)
+    if (surface) this.hide(surface)
+  })
+  private readonly connections = new Map<number, SiteConnection>()
   private readonly surfaces = new Map<number, WindowSurface>()
   private readonly liveDownloads = new Map<string, DownloadItem>()
   /** Downloads started since launch. The profile also holds earlier sessions' history. */
@@ -31,7 +46,10 @@ export class BrowserUIController {
   constructor(options: ControllerOptions) {
     this.options = options
     this.profile.onChange = () => this.broadcast()
+    // The shell shows the toolbar badge; the overlay shows the About panel's update controls.
+    options.updater.onChange = (state) => this.sendToSurfaces('browser-ui:update', state)
     this.registerIPC()
+    this.permissions.install(session.defaultSession)
     // Install once for the shared browsing session, including downloads initiated by popup tabs.
     session.defaultSession.on('will-download', (_event, item, contents) => this.trackDownload(item, contents))
     app.on('will-quit', () => this.profile.flush())
@@ -45,7 +63,7 @@ export class BrowserUIController {
     overlay.setBackgroundColor('#00000000')
     overlay.setVisible(false)
     window.contentView.addChildView(overlay)
-    const surface: WindowSurface = { window, overlay, ready: false, state: null, activeTarget: null }
+    const surface: WindowSurface = { window, overlay, ready: false, state: null, activeTarget: null, siteAnchor: { x: 132, y: 84 } }
     this.surfaces.set(window.webContents.id, surface)
     const shellId = window.webContents.id
     overlay.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -54,7 +72,7 @@ export class BrowserUIController {
     const resize = () => { const [width, height] = window.getContentSize(); overlay.setBounds({ x: 0, y: 0, width, height }) }
     resize()
     window.on('resize', resize)
-    window.on('closed', () => { this.surfaces.delete(shellId); if (!overlay.webContents.isDestroyed()) overlay.webContents.close() })
+    window.on('closed', () => { this.hide(surface); this.surfaces.delete(shellId); if (!overlay.webContents.isDestroyed()) overlay.webContents.close() })
     window.webContents.on('did-start-navigation', (event) => { if (event.isMainFrame && !event.isSameDocument) this.hide(surface) })
     this.attachShortcuts(window.webContents, window)
     this.attachShortcuts(overlay.webContents, window)
@@ -71,10 +89,13 @@ export class BrowserUIController {
   }
 
   private broadcast(): void {
-    const snapshot = this.profile.snapshot()
+    this.sendToSurfaces('browser-ui:snapshot', this.profile.snapshot())
+  }
+
+  private sendToSurfaces(channel: string, payload: unknown): void {
     for (const surface of this.surfaces.values()) {
-      if (!surface.window.isDestroyed()) surface.window.webContents.send('browser-ui:snapshot', snapshot)
-      if (!surface.overlay.webContents.isDestroyed()) surface.overlay.webContents.send('browser-ui:snapshot', snapshot)
+      if (!surface.window.isDestroyed()) surface.window.webContents.send(channel, payload)
+      if (!surface.overlay.webContents.isDestroyed()) surface.overlay.webContents.send(channel, payload)
     }
   }
 
@@ -85,8 +106,34 @@ export class BrowserUIController {
 
   setActiveTarget(window: BrowserWindow, id: number): void {
     const surface = this.surfaces.get(window.webContents.id)
-    if (surface) surface.activeTarget = id
+    if (surface) {
+      if (surface.activeTarget !== id && ['permission', 'connection'].includes(surface.state?.panel ?? '')) this.hide(surface)
+      const changed = surface.activeTarget !== id
+      surface.activeTarget = id
+      if (changed) surface.window.webContents.send('browser-ui:connection', { targetId: id, connection: this.connections.get(id)?.state ?? initialConnection('about:blank') })
+    }
     this.raise(window)
+  }
+
+  attachSiteControls(contents: WebContents, cdp: CdpSession | null): void {
+    this.permissions.attach(contents)
+    const tracker = new SiteConnection((connection) => {
+      for (const surface of this.surfaces.values()) {
+        if (!this.options.getTarget(surface.window, contents.id)) continue
+        if (surface.activeTarget === contents.id) surface.window.webContents.send('browser-ui:connection', { targetId: contents.id, connection })
+        if (surface.state?.panel === 'connection' && surface.state.targetId === contents.id) {
+          surface.state.connection = connection
+          surface.overlay.webContents.send('browser-ui:overlay', surface.state)
+        }
+      }
+    })
+    this.connections.set(contents.id, tracker)
+    tracker.attach(contents, cdp)
+    const closeSitePopup = () => {
+      for (const surface of this.surfaces.values()) if (surface.state?.targetId === contents.id && ['permission', 'connection'].includes(surface.state.panel)) this.hide(surface)
+    }
+    contents.on('did-start-navigation', (event) => { if (event.isMainFrame && !event.isSameDocument) closeSitePopup() })
+    contents.once('destroyed', () => { closeSitePopup(); this.connections.delete(contents.id) })
   }
 
   initializePageZoom(contents: WebContents): void {
@@ -110,9 +157,11 @@ export class BrowserUIController {
     } catch { /* Pages without a standard origin use the creation-time default. */ }
   }
 
-  private show(surface: WindowSurface, panel: BrowserPanel, targetId = surface.activeTarget, anchor = { x: surface.window.getContentSize()[0] - 12, y: 72 }): void {
+  private show(surface: WindowSurface, panel: BrowserPanel, targetId = surface.activeTarget, anchor = { x: surface.window.getContentSize()[0] - 12, y: 72 }, extra: Partial<OverlayState> = {}): void {
+    if (surface.state?.permission) this.hide(surface)
     const target = targetId === null ? null : this.options.getTarget(surface.window, targetId)?.webContents
-    surface.state = { panel, anchor, targetId: target?.id ?? null, url: target?.getURL() ?? '', title: target?.getTitle() ?? '', zoom: this.getPageZoom(target) }
+    surface.state = { panel, anchor, targetId: target?.id ?? null, url: target?.getURL() ?? '', title: target?.getTitle() ?? '', zoom: this.getPageZoom(target), ...extra,
+      ...(panel === 'connection' ? { connection: this.connections.get(target?.id ?? -1)?.state ?? initialConnection('about:blank') } : {}) }
     if (surface.ready) {
       surface.overlay.webContents.send('browser-ui:overlay', surface.state)
       surface.overlay.setVisible(true)
@@ -123,12 +172,16 @@ export class BrowserUIController {
   }
 
   private hide(surface: WindowSurface): void {
+    if (!surface.state) return
+    const sitePopup = surface.state.panel === 'connection' || surface.state.panel === 'permission'
+    const prompt = surface.state?.permission
     surface.state = null
-    surface.overlay.setVisible(false)
+    if (prompt) this.permissions.decide(prompt.id, prompt.targetId, false)
+    if (!surface.overlay.webContents.isDestroyed()) { surface.overlay.webContents.send('browser-ui:overlay', null); surface.overlay.setVisible(false) }
     if (!surface.window.isDestroyed()) {
       surface.window.webContents.send('browser-ui:visibility', false)
       surface.window.webContents.focus()
-      surface.window.webContents.send('browser-ui:restore-focus')
+      surface.window.webContents.send('browser-ui:restore-focus', sitePopup ? 'site' : 'menu')
     }
   }
 
@@ -183,11 +236,28 @@ export class BrowserUIController {
       ipcMain.handle(`browser-ui:${channel}`, (event, ...args: unknown[]) => listener(this.surfaceFor(event), ...args))
     }
     handle('snapshot', () => this.profile.snapshot())
+    handle('site-anchor', (surface, value) => {
+      const point = value as { x?: unknown; y?: unknown } | null
+      if (point && typeof point.x === 'number' && typeof point.y === 'number' && Number.isFinite(point.x) && Number.isFinite(point.y)) surface.siteAnchor = { x: point.x, y: point.y }
+    })
+    handle('connection', (surface, id) => {
+      if (id === null) return initialConnection('about:blank')
+      if (!Number.isInteger(id) || !this.options.getTarget(surface.window, id as number)) throw new Error('This tab does not belong to this window.')
+      return this.connections.get(id as number)?.state ?? { url: '', status: 'unavailable' }
+    })
+    ipcMain.handle('browser-ui:permission-decision', (event, id: unknown, allow: unknown) => {
+      const surface = this.surfaceFor(event)
+      if (event.sender.id !== surface.overlay.webContents.id || typeof id !== 'string' || typeof allow !== 'boolean') throw new Error('Permission decisions require the trusted popup.')
+      const prompt = surface.state?.permission
+      if (prompt?.id === id && surface.activeTarget === prompt.targetId && this.options.getTarget(surface.window, prompt.targetId)) this.permissions.decide(id, prompt.targetId, allow)
+    })
     handle('show', (surface, panel, targetId, anchor) => {
       if (!PANELS.includes(panel as BrowserPanel)) throw new Error('Unknown browser panel.')
       const point = anchor as { x: number; y: number } | undefined
       const safeAnchor = point && Number.isFinite(point.x) && Number.isFinite(point.y) ? point : undefined
-      this.show(surface, panel as BrowserPanel, Number.isInteger(targetId) ? targetId as number : surface.activeTarget, safeAnchor)
+      const id = Number.isInteger(targetId) ? targetId as number : surface.activeTarget
+      if (panel === 'connection' && (id !== surface.activeTarget || id === null || !this.options.getTarget(surface.window, id))) throw new Error('Connection details require the active tab.')
+      this.show(surface, panel as BrowserPanel, id, safeAnchor ?? (panel === 'connection' ? surface.siteAnchor : undefined))
     })
     handle('close', (surface) => this.hide(surface))
     ipcMain.on('browser-ui:ready', (event) => {
@@ -195,7 +265,7 @@ export class BrowserUIController {
         const surface = this.surfaceFor(event)
         if (surface.overlay.webContents.id !== event.sender.id) return
         surface.ready = true
-        if (surface.state) this.show(surface, surface.state.panel, surface.state.targetId, surface.state.anchor)
+        if (surface.state) { surface.overlay.webContents.send('browser-ui:overlay', surface.state); surface.overlay.setVisible(true); this.raise(surface.window) }
       } catch { /* Ignore messages from guest pages. */ }
     })
     handle('command', (surface, command, url) => {
@@ -227,6 +297,10 @@ export class BrowserUIController {
     })
     handle('open-folder', async () => { mkdirSync(this.profile.settings.downloadFolder, { recursive: true }); const error = await shell.openPath(this.profile.settings.downloadFolder); if (error) throw new Error(error) })
     handle('download-action', (surface, id, action) => this.downloadAction(surface, id, action))
+    handle('update-state', () => this.options.updater.state)
+    handle('update-check', () => this.options.updater.check())
+    handle('update-download', () => this.options.updater.download())
+    handle('update-install', () => this.options.updater.install())
     handle('clear-data', async (_surface, payload) => {
       const request = payload as ClearDataRequest
       if (!request || !['hour', 'day', 'week', 'month', 'all'].includes(request.range)) throw new Error('Choose a valid time range.')
