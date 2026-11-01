@@ -2,7 +2,7 @@
   "name": "orbit-browser",
   "description": "Orbit: Agentic AI Browser with Prompt Defense",
   "private": true,
-  "version": "1.0.5",
+  "version": "1.0.10",
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
