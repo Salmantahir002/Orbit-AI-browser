@@ -538,3 +538,8 @@
 }
 
 
+/* Off screen (see useOnScreen in KimoMascot.tsx): hold the pose, stop repainting. */
+.kimo[data-paused],
+.kimo[data-paused] * {
+  animation-play-state: paused !important;
+}

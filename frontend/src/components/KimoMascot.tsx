@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type RefObject } from 'react'
 import '../styles/kimo-mascot.css'
 
 /**
@@ -65,6 +65,27 @@ function usePrefersReducedMotion(): boolean {
   return reduced
 }
 
+/**
+ * Whether any of the element is on screen. The SVG's keyframes repaint on the
+ * main thread every frame, and Kimo is mounted in places nobody is looking at:
+ * the assistant panel stays mounted (warm) while closed, and every reply in a
+ * long chat carries its own avatar. Off screen, the act loop stops and the
+ * animations pause where they are.
+ */
+function useOnScreen(ref: RefObject<Element | null>): boolean {
+  const [onScreen, setOnScreen] = useState(true)
+  useEffect(() => {
+    const element = ref.current
+    if (!element || typeof IntersectionObserver === 'undefined') return
+    // A ratio, not isIntersecting: inside the closed panel (clipped to zero width)
+    // the avatar can still touch the viewport along an edge, which counts as intersecting.
+    const observer = new IntersectionObserver(([entry]) => setOnScreen(entry.intersectionRatio > 0), { threshold: [0, 0.01] })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [ref])
+  return onScreen
+}
+
 export function KimoMascot({
   compact = false,
   act: forcedAct,
@@ -78,9 +99,11 @@ export function KimoMascot({
   const timerRef = useRef<number | null>(null)
   const indexRef = useRef(0)
   const resumeRef = useRef<(() => void) | null>(null)
+  const svgRef = useRef<SVGSVGElement>(null)
+  const onScreen = useOnScreen(svgRef)
 
   useEffect(() => {
-    if (reduced || forcedAct) return
+    if (reduced || forcedAct || !onScreen) return
 
     indexRef.current = Math.floor(Math.random() * ROUTINE.length)
 
@@ -98,7 +121,7 @@ export function KimoMascot({
       resumeRef.current = null
       if (timerRef.current !== null) window.clearTimeout(timerRef.current)
     }
-  }, [reduced, forcedAct])
+  }, [reduced, forcedAct, onScreen])
 
   const handlePointerEnter = () => {
     const resume = resumeRef.current
@@ -112,8 +135,10 @@ export function KimoMascot({
 
   return (
     <svg
+      ref={svgRef}
       className={`kimo ${compact ? 'kimo--compact' : ''}`}
       data-act={reduced ? 'idle' : effectiveAct}
+      data-paused={onScreen ? undefined : ''}
       viewBox="0 0 200 200"
       fill="none"
       role="img"
