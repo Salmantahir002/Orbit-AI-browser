@@ -250,7 +250,7 @@ export function AgentModePanel({ targetId, currentUrl, onOpenTab, onOpenSettings
           <h3>Agent mode</h3>
           <p>
             Give the agent a goal and it will operate this tab for you.
-            Use the toolbar Scan Page button to check any page for hidden instructions.
+            Use the Orbit Scan button in the toolbar to check any page for hidden instructions.
           </p>
           {status ? <p className="agent-intro-hint">{status}</p> : hasPage ? null : <p className="agent-intro-hint">Open a page to begin.</p>}
         </div>

@@ -12,7 +12,7 @@ import type { AgentWorkingMemory } from './agentWorkingMemory'
  * Backend client for the autonomous agent runtime.
  *
  * Deliberately separate from `backendApiClient.ts`. The agent subsystem must
- * stay isolated from the manual "Scan Page" and chat flows in routing, request
+ * stay isolated from the manual Orbit Scan and chat flows in routing, request
  * lifecycle, and error handling, so it does not share their transport either.
  */
 

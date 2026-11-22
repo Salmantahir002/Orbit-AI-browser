@@ -212,7 +212,7 @@ export function BrowserToolbar({
           {/* Frosted: the toolbar behind is one flat colour, so refraction would bend
               nothing visible and its filter costs a dropped frame on the first press. */}
           <LiquidGlass refraction={0} blur={5} elasticity={0.16} />
-          <span>{isScanning ? 'Scanning...' : 'Scan webpage'}</span>
+          <span>{isScanning ? 'Scanning...' : 'Orbit Scan'}</span>
         </button>
 
         <button

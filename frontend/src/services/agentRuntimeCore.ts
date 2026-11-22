@@ -25,7 +25,7 @@ import { describeAgentActivity } from './agentActivity'
  *
  * Security scanning has been removed from the agent execution path to
  * eliminate the latency overhead of the DL classifier on every iteration.
- * Users can still manually scan any page via the toolbar "Scan Page" button
+ * Users can still manually scan any page via the toolbar Orbit Scan button
  * which uses its own independent endpoint (POST /security/check-webpage).
  *
  * There is no main-process agent process to hand off to — this class *is*
