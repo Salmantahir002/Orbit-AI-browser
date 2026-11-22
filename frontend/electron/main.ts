@@ -19,6 +19,7 @@ import { providerSecureStore, type ProviderSaveRequest } from './providerSecureS
 import { BrowserUIController } from './browserUIController.js'
 import { BrowserUpdater } from './browserUpdater.js'
 import { GeminiLiveAudio } from './geminiLiveAudio.js'
+import { PageFullscreen } from './pageFullscreen.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -82,6 +83,9 @@ const agentInputShield = new AgentInputShield((tabId) => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('agent:stop-requested', tabId)
 })
 
+// A page's own fullscreen (a video's full-screen button) covers the whole window, as in Chrome.
+const pageFullscreen = new PageFullscreen((tabId, bounds) => agentInputShield.syncBounds(tabId, bounds))
+
 function requireShell(event: IpcMainInvokeEvent | IpcMainEvent): BrowserWindow | null {
   const frame = event.senderFrame
   if (!frame || frame.routingId !== event.sender.mainFrame.routingId || frame.processId !== event.sender.mainFrame.processId) return null
@@ -106,6 +110,7 @@ function attachGuestBehaviour(view: WebContentsView, mainWindow: BrowserWindow) 
   const contents = view.webContents
   browserUI.attachShortcuts(contents, mainWindow)
   browserUI.initializePageZoom(contents)
+  pageFullscreen.attach(view, mainWindow)
   let lastVisitId: string | null = null
   let lastVisitUrl: string | null = null
   const recordVisit = (url: string) => { lastVisitId = browserUI.profile.recordVisit(url, contents.getTitle()); lastVisitUrl = url }
@@ -152,7 +157,7 @@ function attachGuestBehaviour(view: WebContentsView, mainWindow: BrowserWindow) 
             hostWindow.webContents.send('browser:popup-closed', popupId)
           }
         })
-        hostWindow.webContents.send('browser:popup-tab', { webContentsId: popupId, url, disposition })
+        hostWindow.webContents.send('browser:popup-tab', { webContentsId: popupId, url, disposition, openerId: contents.id })
         if (!suppliedContents) {
           const contentType = postBody?.boundary
             ? `${postBody.contentType}; boundary=${postBody.boundary}`
@@ -434,12 +439,15 @@ ipcMain.on('browser:set-bounds', (event, webContentsId: unknown, bounds: unknown
   const view = requireTabView(event, webContentsId)
   const rect = bounds as { x: number; y: number; width: number; height: number } | null
   if (!view || !rect || ![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)) return
-  view.setBounds({
+  const next = {
     x: Math.round(rect.x),
     y: Math.round(rect.y),
     width: Math.max(0, Math.round(rect.width)),
     height: Math.max(0, Math.round(rect.height)),
-  })
+  }
+  // A fullscreen page keeps the whole window; these bounds wait for its return.
+  if (!pageFullscreen.setBounds(webContentsId as number, next)) return
+  view.setBounds(next)
   agentInputShield.syncBounds(webContentsId as number, view.getBounds())
   if (rect.width > 0 && rect.height > 0) browserUI.setActiveTarget(requireShell(event)!, webContentsId as number)
 })

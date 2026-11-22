@@ -99,8 +99,8 @@ const electronAPI = {
       ipcRenderer.on('browser:tab-event', handler)
       return () => ipcRenderer.removeListener('browser:tab-event', handler)
     },
-    onPopupTab: (listener: (event: { webContentsId: number; url: string; disposition: string }) => void) => {
-      const handler = (_event: IpcRendererEvent, payload: { webContentsId: number; url: string; disposition: string }) => listener(payload)
+    onPopupTab: (listener: (event: { webContentsId: number; url: string; disposition: string; openerId?: number }) => void) => {
+      const handler = (_event: IpcRendererEvent, payload: { webContentsId: number; url: string; disposition: string; openerId?: number }) => listener(payload)
       ipcRenderer.on('browser:popup-tab', handler)
       return () => ipcRenderer.removeListener('browser:popup-tab', handler)
     },

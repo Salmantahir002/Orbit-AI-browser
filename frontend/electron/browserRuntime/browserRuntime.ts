@@ -18,7 +18,11 @@ import {
   dispatchNativeKeyPress,
   dispatchNativeScroll,
   dispatchNativeType,
+  isReservedShortcut,
+  parseKeyCombo,
 } from './nativeInput.js'
+import { locateText, readVisibleText } from './textTargets.js'
+import { chooseNativeOption, describeOptions, matchOption, visibleOptionTexts, withSelect } from './selectControl.js'
 import { capturePageScreenshot, fetchAccessibilityTree } from './pageInspector.js'
 import { buildSemanticState } from './stateBuilder.js'
 import { settleAfterAction, waitForDomStable, waitForNavigation } from './waitEngine.js'
@@ -39,12 +43,16 @@ import {
   type VerificationExpectation,
   type AgentSecuritySnapshot,
   type ClickParams,
+  type ClickTextParams,
+  type HoverParams,
+  type SelectOptionParams,
   type ElementHandle,
   type FillParams,
   type NavigateParams,
   type NavigationResult,
   type PageStateSnapshot,
   type PressKeyParams,
+  type ReadTextParams,
   type RuntimeCommandName,
   type RuntimeCommandResult,
   type RuntimeParams,
@@ -298,6 +306,16 @@ export class BrowserRuntime {
         return this.type(session, params as TypeParams)
       case 'pressKey':
         return this.pressKey(session, params as PressKeyParams)
+      case 'clickText':
+        return this.clickText(session, params as ClickTextParams)
+      case 'selectOption':
+        return this.selectOption(session, params as SelectOptionParams)
+      case 'hover':
+        return this.hover(session, params as HoverParams)
+      case 'goBack':
+        return this.goBack(session)
+      case 'readText':
+        return readVisibleText(session, (params as ReadTextParams).selector, (params as ReadTextParams).maxChars)
       case 'scroll':
         return this.scroll(session, params as ScrollParams)
       case 'upload':
@@ -508,6 +526,11 @@ export class BrowserRuntime {
     }
 
     const handle = this.requireHandle(session, params.elementId)
+    // A native <select> cannot be typed into after a click (the click opens an
+    // OS popup CDP cannot reach), so "fill" on one means "choose this option".
+    const nativeSelect = await withSelect(session, handle, async () => true)
+    if (nativeSelect) return this.selectOption(session, { elementId: params.elementId, option: params.value })
+
     // Clicking focuses the way a user would, which also opens comboboxes and
     // date pickers that only react to pointer input.
     const point = await resolveElementPoint(session, handle)
@@ -712,14 +735,146 @@ export class BrowserRuntime {
       throw new BrowserRuntimeError('INVALID_ARGUMENT', 'pressKey requires a key name')
     }
 
+    // Planner keys arrive as "Control+m"; internal callers pass modifiers.
+    const combo = typeof params.modifiers === 'number'
+      ? { key: params.key, modifiers: params.modifiers }
+      : parseKeyCombo(params.key)
+    if (isReservedShortcut(combo.key, combo.modifiers)) {
+      throw new BrowserRuntimeError('INVALID_ARGUMENT', `"${params.key}" is a browser shortcut and is not sent to the page`)
+    }
+
     return this.withVerification(
       session,
       'change',
       async () => {
         await pulseVirtualCursorTyping(session, params.key)
-        await dispatchNativeKeyPress(session, params.key, params.modifiers ?? 0)
+        await dispatchNativeKeyPress(session, combo.key, combo.modifiers)
       },
     )
+  }
+
+  /**
+   * Chooses a dropdown option. Native selects are driven by the keyboard
+   * (selectControl.ts); anything else is a custom widget, opened with a real
+   * click and answered by clicking the option's visible text, typing into it
+   * first when it is a filterable combobox that only lists matches.
+   */
+  private async selectOption(session: CdpSession, params: SelectOptionParams): Promise<ActionAck> {
+    if (typeof params.option !== 'string' || !params.option.trim()) {
+      throw new BrowserRuntimeError('INVALID_ARGUMENT', 'select_option requires the option label')
+    }
+    const handle = this.requireHandle(session, params.elementId)
+    const point = await resolveElementPoint(session, handle)
+    await moveVirtualCursor(session, point, handle.name || 'select')
+
+    const native = await withSelect(session, handle, async (objectId, state) => {
+      const index = matchOption(state.options, params.option)
+      if (index === -1) {
+        throw new BrowserRuntimeError(
+          'ELEMENT_NOT_FOUND',
+          `No option matching "${params.option}" in ${handle.name || 'the dropdown'}. Available: ${describeOptions(state.options)}`,
+        )
+      }
+      const label = state.options[index]!.label
+      if (state.selectedIndex === index) return { label, method: 'already' as const }
+      await pulseVirtualCursorClick(session, point)
+      const chosen = await chooseNativeOption(session, objectId, state, index)
+      return { label, method: chosen.method }
+    })
+
+    if (native) {
+      await settleAfterAction(session)
+      const reason = native.method === 'already'
+        ? `"${native.label}" was already selected`
+        : `Selected "${native.label}"${native.method === 'script' ? ' (set directly; the dropdown ignored the keyboard)' : ''}`
+      return this.ack({
+        verified: true, urlChanged: false, structureChanged: false, scrollChanged: false,
+        valueChanged: native.method !== 'already', checkedChanged: false, expectation: 'value', reason,
+      })
+    }
+
+    // Custom dropdown: open it, then pick the option by its text.
+    await pulseVirtualCursorClick(session, point)
+    await dispatchNativeClick(session, point)
+    await settleAfterAction(session)
+    let match = await locateText(session, params.option, undefined, { preferOptions: true }).catch(() => null)
+    if (!match) {
+      // Filterable comboboxes list only what matches the typed text.
+      await dispatchNativeType(session, params.option)
+      await settleAfterAction(session)
+      match = await locateText(session, params.option, undefined, { preferOptions: true }).catch(() => null)
+    }
+    if (!match) {
+      const visible = await visibleOptionTexts(session)
+      throw new BrowserRuntimeError(
+        'ELEMENT_NOT_FOUND',
+        `Opened ${handle.name || 'the dropdown'} but no option "${params.option}" is visible` +
+          (visible.length > 0 ? `. Visible options: ${visible.map((text) => `"${text}"`).join(', ')}` : ''),
+      )
+    }
+    const optionPoint = await resolveElementPoint(session, match.handle)
+    await moveVirtualCursor(session, optionPoint, match.matchedText.slice(0, 60))
+    const ack = await this.withVerification(session, 'change', async () => {
+      await pulseVirtualCursorClick(session, optionPoint)
+      await dispatchNativeClick(session, optionPoint)
+    }, { backendNodeId: handle.backendNodeId })
+    if (!ack.verification) return ack
+    return { ...ack, verification: { ...ack.verification, reason: `Chose "${match.matchedText.slice(0, 80)}" — ${ack.verification.reason}` } }
+  }
+
+  /** Moves the pointer onto an element so hover menus and tooltips open. */
+  private async hover(session: CdpSession, params: HoverParams): Promise<ActionAck> {
+    const handle = this.requireHandle(session, params.elementId)
+    const point = await resolveElementPoint(session, handle)
+    await moveVirtualCursor(session, point, handle.name || 'hover')
+    return this.withVerification(session, 'change', async () => {
+      await session.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y, button: 'none', buttons: 0 })
+    }, { backendNodeId: handle.backendNodeId })
+  }
+
+  /** The Back button: the previous entry in this tab's own history. */
+  private async goBack(session: CdpSession): Promise<NavigationResult> {
+    const history = await session.send('Page.getNavigationHistory')
+    const index = typeof history.currentIndex === 'number' ? history.currentIndex : 0
+    const entries = Array.isArray(history.entries) ? history.entries as Array<{ id: number; url: string }> : []
+    const previous = entries[index - 1]
+    if (index <= 0 || !previous) {
+      throw new BrowserRuntimeError('NAVIGATION_BLOCKED', 'There is no previous page in this tab')
+    }
+    const before = await captureActionSignature(session)
+    // Same-document history (single-page apps) fires no load, so a timeout
+    // here is not a failure; the DOM wait below covers both cases.
+    const settled = waitForNavigation(session, { timeoutMs: 15_000 }).catch(() => undefined)
+    await session.send('Page.navigateToHistoryEntry', { entryId: previous.id })
+    await settled
+    await waitForDomStable(session).catch(() => undefined)
+    this.elementHandles.delete(session.targetId)
+    const after = await captureActionSignature(session)
+    return { ...this.ack(verifyAction(before, after, { expectation: 'url' })), url: session.url() }
+  }
+
+  /**
+   * Clicks visible text that has no element id: SVG placeholders such as
+   * Google Slides' "Click to add title". The text is resolved to its DOM node
+   * and aimed at through content quads, exactly like an element click.
+   */
+  private async clickText(session: CdpSession, params: ClickTextParams): Promise<ActionAck> {
+    const match = await locateText(session, params.text, params.nth)
+    const point = await resolveElementPoint(session, match.handle)
+    await moveVirtualCursor(session, point, match.matchedText.slice(0, 60) || 'click')
+
+    const ack = await this.withVerification(
+      session,
+      'change',
+      async () => {
+        await pulseVirtualCursorClick(session, point)
+        await dispatchNativeClick(session, point, { clickCount: params.clickCount })
+      },
+      { backendNodeId: match.handle.backendNodeId },
+    )
+    if (!ack.verification) return ack
+    const where = match.matches > 1 ? ` (best of ${match.matches} visible matches)` : ''
+    return { ...ack, verification: { ...ack.verification, reason: `Clicked text "${match.matchedText.slice(0, 80)}"${where} — ${ack.verification.reason}` } }
   }
 
   /**

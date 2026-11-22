@@ -115,7 +115,22 @@ export type PageStateSnapshot = {
   downloads?: SessionDownload[]
   /** Set while the page waits for files, e.g. after its "Attach" button was clicked. */
   fileChooser?: { multiple: boolean } | null
+  /** Popups, tips and side panels, with the buttons that close them. */
+  popups?: PagePopup[]
 }
+
+/**
+ * Something laid over the page that a person would close before working: an
+ * onboarding tip ("Save time with tables"), a promo dialog, a side panel. Each
+ * lists the buttons that close it. `auto` marks labels so harmless the agent
+ * loop closes them by itself ("Got it", "Dismiss", "No thanks").
+ */
+export type PagePopup = {
+  role: string
+  name: string
+  closeButtons: Array<{ id: string; name: string; auto: boolean }>
+}
+
 
 /** A file downloaded earlier in this session, addressed by an id valid until the next state extraction. */
 export type SessionDownload = { id: string; filename: string; sizeBytes: number }
@@ -143,7 +158,14 @@ export type NavigateParams = { url: string; timeoutMs?: number }
 export type ClickParams = { elementId: string; button?: 'left' | 'right' | 'middle'; clickCount?: number }
 export type FillParams = { elementId: string; value: string; delayMs?: number }
 export type TypeParams = { text: string; delayMs?: number }
+/** `key` may be a shortcut such as "Control+m" when `modifiers` is omitted. */
 export type PressKeyParams = { key: string; modifiers?: number }
+/** Visible text to click when it has no element id (SVG/canvas app surfaces). */
+export type ClickTextParams = { text: string; nth?: number; clickCount?: number }
+export type ReadTextParams = { selector?: string; maxChars?: number }
+/** Picks a dropdown option by visible label or value (native select or custom combobox). */
+export type SelectOptionParams = { elementId: string; option: string }
+export type HoverParams = { elementId: string }
 export type ScrollParams = { deltaX?: number; deltaY?: number; elementId?: string }
 /**
  * Note there is no `filePaths`: the planner never names a path. It names one
@@ -183,6 +205,11 @@ export type RuntimeCommandMap = {
   fill: { params: FillParams; result: ActionAck }
   type: { params: TypeParams; result: ActionAck }
   pressKey: { params: PressKeyParams; result: ActionAck }
+  clickText: { params: ClickTextParams; result: ActionAck }
+  readText: { params: ReadTextParams; result: BrowserObservation }
+  selectOption: { params: SelectOptionParams; result: ActionAck }
+  hover: { params: HoverParams; result: ActionAck }
+  goBack: { params: EmptyParams; result: NavigationResult }
   scroll: { params: ScrollParams; result: ActionAck }
   upload: { params: UploadParams; result: ActionAck }
   waitForNavigation: { params: WaitParams; result: ActionAck }

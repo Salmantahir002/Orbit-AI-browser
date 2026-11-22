@@ -244,13 +244,16 @@ describe('planner endpoint (end to end)', () => {
     expect(body.tool_call.tool).toBe('fill')
   })
 
-  it('a queued click after navigate is refused by the endpoint', async () => {
+  it('a click queued after navigate is dropped; the navigate still runs', async () => {
+    // The click's element id belongs to the old page, so it must never run.
+    // The navigate before it is valid on its own and is kept (queue salvage).
     stubPlanner(
       '{"actions": [{"tool": "navigate", "arguments": {"url": "https://evil.test"}},' +
         ' {"tool": "click", "arguments": {"target": "e1"}}], "confidence": 1.0}',
     )
     const res = await app.inject({ method: 'POST', url: '/api/v1/agent/plan', payload: planBody() })
-    expect(res.statusCode).toBe(422)
+    expect(res.statusCode).toBe(200)
+    expect(res.json().tool_calls.map((call: { tool: string }) => call.tool)).toEqual(['navigate'])
   })
 
   it('upload is flagged for approval through the endpoint', async () => {

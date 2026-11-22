@@ -40,7 +40,21 @@ export function resolveToolCall(call: AgentToolCall): ResolvedToolCommand {
     case 'type':
       return { command: 'type', params: { text: asString(args.text) } }
     case 'press_key':
+      // Shortcuts ("Control+m") are parsed and screened by the runtime.
       return { command: 'pressKey', params: { key: asString(args.key) } }
+    case 'click_text':
+      return { command: 'clickText', params: { text: asString(args.text), nth: asNumber(args.nth) } }
+    case 'select_option':
+      return { command: 'selectOption', params: { elementId: asString(args.target), option: asString(args.option) } }
+    case 'hover':
+      return { command: 'hover', params: { elementId: asString(args.target) } }
+    case 'go_back':
+      return { command: 'goBack', params: {} }
+    case 'read_text':
+      return {
+        command: 'readText',
+        params: { selector: args.selector === undefined ? undefined : asString(args.selector) },
+      }
     case 'navigate':
       return { command: 'navigate', params: { url: asString(args.url) } }
     case 'scroll':
@@ -66,6 +80,7 @@ export function resolveToolCall(call: AgentToolCall): ResolvedToolCommand {
     // loop creates the tab and re-points itself at it rather than sending a
     // command to the Browser Runtime, which only ever drives one existing tab.
     case 'open_tab':
+    case 'ask_user':
     case 'extract':
     case 'finish':
       return null

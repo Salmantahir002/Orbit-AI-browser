@@ -32,7 +32,7 @@ interface Window {
       setActiveTab: (webContentsId: number) => void
       setBounds: (webContentsId: number, bounds: { x: number; y: number; width: number; height: number }) => void
       onTabEvent: (listener: (event: BrowserTabEvent) => void) => () => void
-      onPopupTab: (listener: (event: { webContentsId: number; url: string; disposition: string }) => void) => () => void
+      onPopupTab: (listener: (event: { webContentsId: number; url: string; disposition: string; openerId?: number }) => void) => () => void
       onPopupClosed: (listener: (webContentsId: number) => void) => () => void
       setAgentLock: (webContentsId: number, locked: boolean) => Promise<boolean>
       onAgentStopRequested: (listener: (webContentsId: number) => void) => () => void

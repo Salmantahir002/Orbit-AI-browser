@@ -64,6 +64,12 @@ export const TOOL_CONFIDENCE_THRESHOLDS: Readonly<Record<string, number>> = {
   fill: 0.0,
   type: 0.0,
   press_key: 0.0,
+  click_text: 0.0,
+  read_text: 0.0,
+  select_option: 0.0,
+  hover: 0.0,
+  go_back: 0.0,
+  ask_user: 0.0,
   navigate: 0.0,
   open_tab: 0.0,
   scroll: 0.0,
@@ -139,10 +145,10 @@ export function approvalFor(
 
   // Only actions that actually commit something are worth interrupting for.
   // Typing into a field or scrolling is freely reversible.
-  if (toolCall.tool === 'click' || toolCall.tool === 'press_key') {
+  if (toolCall.tool === 'click' || toolCall.tool === 'press_key' || toolCall.tool === 'click_text') {
     const label = target
       ? `${target.name} ${target.description ?? ''}`
-      : String(toolCall.arguments?.key ?? '')
+      : String(toolCall.arguments?.key ?? toolCall.arguments?.text ?? '')
 
     const cookieContext = [label, ...(pageState?.dialogs.map(dialog => JSON.stringify(dialog)) ?? [])].join(' ')
     const cookieDismissal = /cookie|consent preferences/i.test(cookieContext) && /^(accept( all)?|reject( all)?|agree|allow( all)?|close|dismiss|save preferences)\b/i.test(target?.name ?? '')
@@ -150,7 +156,9 @@ export function approvalFor(
     if (matched) {
       return {
         toolCall,
-        summary: `Click ${describeElement(target, 'a control')}`,
+        summary: toolCall.tool === 'click_text'
+          ? `Click the text "${String(toolCall.arguments?.text ?? '').slice(0, 80)}"`
+          : `Click ${describeElement(target, 'a control')}`,
         reason: matched.reason,
         risk: matched.risk,
       }

@@ -637,8 +637,9 @@
 
 /* Scan and Ai Agent are Liquid Glass pills (see LiquidGlass): the glass
    paints the fill and the rim, and its springs own the transform, so neither
-   sets a background or border, nor transitions transform. Each keeps its
-   colour as a tint of the glass (--lg-tint), which fades between states.
+   sets a background or border, nor transitions transform. Both are the same
+   neutral glass; only an open Ai Agent takes a colour, as a tint of the glass
+   (--lg-tint), which fades between states.
    No opacity or filter on the pills themselves: either would cut the glass
    off from what is behind it, so a disabled pill dims its contents instead. */
 .scan-button.lg-host,
@@ -661,13 +662,14 @@
 }
 
 .scan-button.lg-host {
-  padding: 0 10px;
-  --lg-tint: rgba(52, 211, 153, 0.1);
-  color: #34d399;
+  padding: 0 12px;
+  --lg-tint: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.65);
 }
 
 .scan-button:hover:not(:disabled) {
-  --lg-tint: rgba(52, 211, 153, 0.2);
+  --lg-tint: rgba(255, 255, 255, 0.1);
+  color: #fff;
 }
 
 .scan-button:disabled {
@@ -676,11 +678,6 @@
 
 .scan-button:disabled > :not(.lg-layers) {
   opacity: 0.64;
-}
-
-.scan-button svg {
-  width: 13px;
-  height: 13px;
 }
 
 .assistant-pill.lg-host {
@@ -1275,8 +1272,8 @@
 }
 
 .homepage-message--search-open .homepage-content {
-  opacity: 0.4;
-  filter: blur(7px);
+  opacity: 0.55;
+  filter: blur(1.5px);
   pointer-events: none;
   transform: scale(0.975);
 }
@@ -1364,33 +1361,40 @@
 
 .homepage-start-button:focus-visible,
 .homepage-search-submit:focus-visible,
-.homepage-suggestions button:focus-visible {
+.homepage-suggestions-list button:focus-visible {
   outline: 2px solid #fcd34d;
   outline-offset: 3px;
 }
 
-/* ponytail: native :focus-within on container; add JS focus management if complex multi-input subcomponents arrive */
+/* The search popup in Liquid Glass (see LiquidGlass). Clear glass, not a
+   frosted slab: the page behind stays sharp in the middle and bends at the
+   curved rim, with only a light blur and a thin smoke for the text. The
+   outer box only places it; the glass inside owns its transform (the
+   springs), and nothing around it may carry opacity or a filter, either of
+   which would cut the glass off from the page behind it. */
 .homepage-search-popup {
   position: absolute;
   top: clamp(74px, 27%, 205px);
   left: 50%;
   z-index: 2;
   width: min(760px, calc(100% - 48px));
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 20px;
-  background: rgba(24, 27, 27, 0.94);
-  backdrop-filter: blur(20px) saturate(1.2);
-  -webkit-backdrop-filter: blur(20px) saturate(1.2);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   transform: translate(-50%, -50%);
-  animation: search-popup-enter 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
-  transition: border-color 160ms ease, box-shadow 160ms ease;
+  /* Transform only, for the reason above: the glass swells into place. */
+  animation: search-popup-enter 420ms cubic-bezier(0.34, 1.36, 0.64, 1) both;
 }
 
-.homepage-search-popup:focus-within {
-  border-color: rgba(251, 191, 36, 0.6);
-  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.2), 0 28px 72px rgba(0, 0, 0, 0.62), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+.homepage-search-glass.lg-host {
+  border-radius: 29px;
+  --lg-tint:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.012) 55%),
+    rgba(14, 17, 16, 0.2);
+  color: rgba(255, 255, 255, 0.96);
+}
+
+/* Typing lights the whole rim, as the pointer lights the side it nears. */
+.homepage-search-glass:focus-within {
+  --lg-focus: 1;
+  box-shadow: 0 0 36px rgba(251, 191, 36, 0.1);
 }
 
 .homepage-search-backdrop {
@@ -1399,10 +1403,11 @@
   z-index: 1;
   padding: 0;
   border: 0;
-  background: rgba(3, 8, 6, 0.45);
+  /* A light dim only: the glass needs a page behind it to bend. */
+  background: rgba(3, 8, 6, 0.26);
   cursor: default;
-  backdrop-filter: blur(12px) saturate(0.85);
-  -webkit-backdrop-filter: blur(12px) saturate(0.85);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
   animation: homepage-backdrop-enter 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
@@ -1412,18 +1417,19 @@
   align-items: center;
   gap: 12px;
   min-height: 58px;
-  padding: 0 8px 0 18px;
+  padding: 0 8px 0 20px;
 }
 
 .homepage-search-popup form > svg {
   width: 20px;
   height: 20px;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(255, 255, 255, 0.62);
+  filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.4));
   transition: color 160ms ease;
 }
 
 .homepage-search-popup:focus-within form > svg {
-  color: rgba(251, 191, 36, 0.85);
+  color: #fcd34d;
 }
 
 .homepage-search-popup input {
@@ -1432,11 +1438,12 @@
   border: 0;
   outline: none;
   background: transparent;
-  color: rgba(255, 255, 255, 0.96);
+  color: rgba(255, 255, 255, 0.97);
   font-family: inherit;
   font-size: 16px;
   letter-spacing: -0.015em;
   padding: 14px 0;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
 }
 
 .homepage-search-popup input:focus,
@@ -1446,39 +1453,69 @@
 }
 
 .homepage-search-popup input::placeholder {
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 0.5);
 }
 
-.homepage-search-submit {
+/* A drop of amber glass in the field: tinted, not painted, with a white glyph. */
+.homepage-search-submit.lg-host {
   display: inline-grid;
   width: 42px;
   height: 42px;
   place-items: center;
   border: 0;
-  border-radius: 12px;
-  background: linear-gradient(135deg, rgba(251, 191, 36, 0.96), rgba(245, 158, 11, 0.9));
-  color: #1b1709;
+  border-radius: 50%;
+  --lg-tint:
+    radial-gradient(circle at 50% 20%, rgba(255, 236, 170, 0.4), transparent 62%),
+    linear-gradient(160deg, rgba(251, 191, 36, 0.72), rgba(245, 158, 11, 0.56));
+  color: #fffaf0;
+  filter: none;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.35);
-  transition: transform 150ms ease, filter 150ms ease, box-shadow 150ms ease;
 }
 
-.homepage-search-submit:hover {
-  filter: brightness(1.08);
-  box-shadow: 0 6px 18px rgba(245, 158, 11, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.45);
-  transform: scale(1.04);
+.homepage-search-submit .lg-tint {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    inset 0 -1px 1px rgba(120, 53, 15, 0.25),
+    0 3px 10px rgba(0, 0, 0, 0.28);
 }
 
-.homepage-search-submit:active {
-  transform: scale(0.96);
+.homepage-search-submit.lg-host:hover {
+  --lg-tint:
+    radial-gradient(circle at 50% 20%, rgba(255, 236, 170, 0.5), transparent 62%),
+    linear-gradient(160deg, rgba(251, 191, 36, 0.84), rgba(245, 158, 11, 0.68));
 }
 
-.homepage-suggestions {
-  padding: 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+.homepage-search-submit svg {
+  filter: drop-shadow(0 1px 2px rgba(120, 53, 15, 0.45));
 }
 
-.homepage-suggestions button {
+/* The suggestions, on a second pane of the same clear glass hanging
+   below the field. Absolutely placed, so the field stays put as the list
+   comes and goes. Its entrance keeps no fill once it has run: the springs
+   write the glass's transform inline, and a filled animation would win. */
+.homepage-suggestions.lg-host {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  right: 0;
+  padding: 8px;
+  border-radius: 26px;
+  --lg-tint:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.012) 45%),
+    rgba(14, 17, 16, 0.24);
+  animation: homepage-suggestions-enter 300ms cubic-bezier(0.34, 1.3, 0.64, 1) backwards;
+}
+
+.homepage-suggestions-list {
+  /* What is left of the window below the field (toolbar, field and margins
+     take about 330px), so the list scrolls rather than running off it. */
+  max-height: max(150px, min(500px, calc(100vh - 330px)));
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+.homepage-suggestions-list button {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
@@ -1486,30 +1523,33 @@
   width: 100%;
   padding: 10px 14px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 18px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.76);
+  color: rgba(255, 255, 255, 0.82);
   cursor: pointer;
   font-family: inherit;
   font-size: 14px;
   text-align: left;
-  transition: background 130ms ease, color 130ms ease;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
+  transition: background 130ms ease, color 130ms ease, box-shadow 130ms ease;
 }
 
-.homepage-suggestions button svg {
+.homepage-suggestions-list button svg {
   width: 16px;
   height: 16px;
-  color: rgba(251, 191, 36, 0.72);
+  color: rgba(252, 211, 77, 0.8);
 }
 
-.homepage-suggestions button span {
+.homepage-suggestions-list button span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.homepage-suggestions button:hover {
-  background: rgba(255, 255, 255, 0.08);
+/* The hovered row is a thicker patch of the same glass. */
+.homepage-suggestions-list button:hover {
+  background: rgba(255, 255, 255, 0.09);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
   color: #fff;
 }
 
@@ -1526,12 +1566,16 @@
 
 @keyframes search-popup-enter {
   from {
-    opacity: 0;
-    transform: translate(-50%, -46%) scale(0.96);
+    transform: translate(-50%, -44%) scale(0.9);
   }
   to {
-    opacity: 1;
     transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes homepage-suggestions-enter {
+  from {
+    transform: translateY(-8px) scale(0.97);
   }
 }
 
@@ -1542,7 +1586,7 @@
   }
   to {
     opacity: 1;
-    backdrop-filter: blur(9px) saturate(0.78);
+    backdrop-filter: blur(2px);
   }
 }
 
@@ -1560,6 +1604,7 @@
   .homepage-start-button,
   .homepage-start-button svg,
   .homepage-search-popup,
+  .homepage-suggestions,
   .homepage-search-backdrop {
     animation: none;
     transition: none;
@@ -4067,239 +4112,32 @@
 }
 
 /* ────────────────────────────────────────────────────
-   Solar System Transitional Animation (Optimized)
+   Welcome Screen Exit Transition
    ──────────────────────────────────────────────────── */
 
-.solar-system {
-  position: absolute;
-  inset: -100px;
-  z-index: 3; /* Render on top of the orb (default z-index 0) and under button (z-index 2) */
+/* One opacity fade on the whole screen: a single composited layer, so every
+   frame costs the same and nothing re-rasters (the glass, orb and aurora fade
+   together as one group, which also keeps the glass refracting the orb). */
+.startup-screen--transitioning {
   pointer-events: none;
-  perspective: 1000px;
-  transform-style: preserve-3d;
-  opacity: 0.85; /* Beautifully visible orbiting backdrop */
-  transform: scale(1) rotateZ(0deg) translateZ(0px);
-  will-change: transform, opacity;
+  animation: startupFadeOut 0.45s ease-out forwards;
 }
 
-/* Solar system during transition: keep centered, particles continue orbiting smoothly, then fades out */
-.startup-screen--transitioning .solar-system {
-  animation: solarFadeOut 2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  will-change: opacity;
+/* Freeze the idle loops (orb float, aurora drift) for the fade: no point
+   repainting motion that is on its way out. */
+.startup-screen--transitioning *,
+.startup-screen--transitioning *::before,
+.startup-screen--transitioning *::after {
+  animation-play-state: paused;
 }
 
-.orbit {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  border: 1px dashed rgba(255, 255, 255, 0.15);
-  border-radius: 50%;
-  transform-style: preserve-3d;
-  transform: translate(-50%, -50%);
-  transition: border-color 2s cubic-bezier(0.16, 1, 0.3, 1);
-  will-change: transform;
-  backface-visibility: hidden;
-}
-
-.orbit--1 {
-  width: 140%;
-  height: 140%;
-  transform: translate(-50%, -50%) rotateX(75deg) rotateY(15deg) translateZ(0);
-  animation: spinOrbit1 6s linear infinite;
-}
-
-.orbit--2 {
-  width: 180%;
-  height: 180%;
-  transform: translate(-50%, -50%) rotateX(65deg) rotateY(-25deg) translateZ(0);
-  animation: spinOrbit2 9s linear infinite;
-}
-
-.orbit--3 {
-  width: 220%;
-  height: 220%;
-  transform: translate(-50%, -50%) rotateX(80deg) rotateY(45deg) translateZ(0);
-  animation: spinOrbit3 12s linear infinite;
-}
-
-/* Planet nodes orbiting */
-.planet {
-  position: absolute;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #fff;
-  transform-style: preserve-3d;
-  box-shadow: 0 0 15px currentColor;
-  transform: scale(1) translateZ(0);
-  transition: transform 2s cubic-bezier(0.16, 1, 0.3, 1);
-  will-change: transform;
-  backface-visibility: hidden;
-}
-
-.planet--1 {
-  top: 0;
-  left: 50%;
-  color: #34d399;
-  /* Green security particle */
-  background: radial-gradient(circle, #52a9ff, #34d399);
-}
-
-.planet--2 {
-  bottom: 50%;
-  right: 0;
-  color: #8ab4f8;
-  /* Blue ML particle */
-  background: radial-gradient(circle, #a5b4fc, #8ab4f8);
-}
-
-.planet--3 {
-  top: 50%;
-  left: 0;
-  color: #fbbf24;
-  /* Amber gateway particle */
-  background: radial-gradient(circle, #fca5a5, #fbbf24);
-}
-
-/* Hyper-acceleration particle orbiting during transition */
-.startup-screen--transitioning .orbit--1 {
-  border-color: rgba(52, 211, 153, 0.7);
-  animation: spinOrbit1 1.4s linear infinite;
-}
-
-.startup-screen--transitioning .orbit--2 {
-  border-color: rgba(138, 180, 248, 0.7);
-  animation: spinOrbit2 1.8s linear infinite;
-}
-
-.startup-screen--transitioning .orbit--3 {
-  border-color: rgba(251, 191, 36, 0.7);
-  animation: spinOrbit3 2.2s linear infinite;
-}
-
-.startup-screen--transitioning .planet {
-  transform: scale(1.6) translateZ(0);
-  box-shadow: 0 0 25px currentColor;
-  transition: transform 0.4s ease, box-shadow 0.4s ease;
-}
-
-/* Base spins */
-@keyframes spinOrbit1 {
+@keyframes startupFadeOut {
   from {
-    transform: translate(-50%, -50%) rotateX(75deg) rotateY(15deg) rotateZ(0deg) translateZ(0);
-  }
-
-  to {
-    transform: translate(-50%, -50%) rotateX(75deg) rotateY(15deg) rotateZ(360deg) translateZ(0);
-  }
-}
-
-@keyframes spinOrbit2 {
-  from {
-    transform: translate(-50%, -50%) rotateX(65deg) rotateY(-25deg) rotateZ(360deg) translateZ(0);
-  }
-
-  to {
-    transform: translate(-50%, -50%) rotateX(65deg) rotateY(-25deg) rotateZ(0deg) translateZ(0);
-  }
-}
-
-@keyframes spinOrbit3 {
-  from {
-    transform: translate(-50%, -50%) rotateX(80deg) rotateY(45deg) rotateZ(0deg) translateZ(0);
-  }
-
-  to {
-    transform: translate(-50%, -50%) rotateX(80deg) rotateY(45deg) rotateZ(360deg) translateZ(0);
-  }
-}
-
-/* ────────────────────────────────────────────────────
-   Transition Fading and Explosions
-   ──────────────────────────────────────────────────── */
-
-/* Fade out other elements explicitly */
-.startup-screen--transitioning .welcome-title,
-.startup-screen--transitioning .startup-header,
-.startup-screen--transitioning .startup-guide {
-  opacity: 0 !important;
-  transform: translate3d(0, -20px, 0) scale(0.95);
-  pointer-events: none;
-  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.6s ease;
-  will-change: transform, opacity;
-}
-
-.startup-screen--transitioning .start-button-anchor {
-  transform: translate3d(-50%, 50%, 0) scale(0.8);
-  pointer-events: none;
-  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-/* The slider fades layer by layer: opacity on the button would cut its glass
-   off from the orb mid-fade (see .start-button). */
-.startup-screen--transitioning .start-button :is(.lg-warp, .lg-tint, .lg-sheen, .lg-rim),
-.startup-screen--transitioning .start-button__label,
-.startup-screen--transitioning .start-button__arrow {
-  opacity: 0 !important;
-  transition: opacity 0.6s ease;
-}
-
-/* Planet orb during transition: stays at scale(1) without zooming into the planet, then smoothly fades */
-.startup-screen--transitioning .defense-orb {
-  animation: orbFadeOut 2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  will-change: opacity;
-  backface-visibility: hidden;
-}
-
-.startup-screen--transitioning .defense-orb-img {
-  backface-visibility: hidden;
-}
-
-/* Fading background layers smoothly during transition */
-.startup-screen--transitioning .aurora-layer,
-.startup-screen--transitioning .orb-wrap::before {
-  animation: none;
-  opacity: 0;
-  filter: none;
-  transition: opacity 0.8s ease 0.6s;
-}
-
-.startup-screen--transitioning .grain-layer {
-  opacity: 0;
-  transition: opacity 0.8s ease 0.6s;
-}
-
-@keyframes orbFadeOut {
-  0% {
     opacity: 1;
-    transform: scale(1) translate3d(0, 0, 0);
   }
 
-  65% {
-    opacity: 1;
-    transform: scale(1) translate3d(0, 0, 0);
-  }
-
-  100% {
+  to {
     opacity: 0;
-    transform: scale(1) translate3d(0, 0, 0);
-  }
-}
-
-@keyframes solarFadeOut {
-  0% {
-    opacity: 0.85;
-    transform: scale(1) translateZ(0);
-  }
-
-  65% {
-    opacity: 1;
-    transform: scale(1) translateZ(0);
-  }
-
-  100% {
-    opacity: 0;
-    transform: scale(1) translateZ(0);
   }
 }
 
@@ -4713,6 +4551,89 @@
   white-space: nowrap;
 }
 
+/* Analyse → act → verify: the up-front brief and each self-check verdict. */
+.agent-brief,
+.agent-check {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(126, 162, 248, 0.2);
+  background: rgba(126, 162, 248, 0.06);
+  font-size: 12px;
+  color: rgba(233, 238, 245, 0.85);
+}
+
+.agent-brief summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.agent-brief summary::-webkit-details-marker { display: none; }
+
+.agent-brief-label,
+.agent-check-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #a9c1ff;
+}
+
+.agent-brief-summary { font-weight: 600; color: #e9eef5; line-height: 1.45; }
+
+.agent-brief-caption {
+  display: block;
+  margin-top: 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: rgba(233, 238, 245, 0.55);
+}
+
+.agent-brief-requirements,
+.agent-check-list {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  line-height: 1.4;
+}
+
+.agent-brief-content {
+  margin: 4px 0 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.22);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.agent-check-list { list-style: none; padding-left: 0; }
+.agent-check-list li { display: flex; gap: 6px; }
+.agent-check-item--met > span:first-child { color: #8fe9c8; }
+.agent-check-item--unmet > span:first-child { color: #ffc878; }
+
+.agent-check-evidence {
+  display: block;
+  font-size: 11px;
+  color: rgba(233, 238, 245, 0.5);
+}
+
+.agent-check-next { display: block; margin-top: 6px; font-size: 11px; color: rgba(233, 238, 245, 0.7); }
+.agent-check--accepted { border-color: rgba(111, 224, 184, 0.3); background: rgba(111, 224, 184, 0.06); }
+.agent-check--accepted .agent-check-title { color: #8fe9c8; }
+.agent-check--rejected,
+.agent-check--unconfirmed { border-color: rgba(255, 200, 120, 0.26); background: rgba(255, 200, 120, 0.05); }
+.agent-check--rejected .agent-check-title,
+.agent-check--unconfirmed .agent-check-title { color: #ffc878; }
+
 .agent-result {
   padding: 12px 14px;
   border-radius: 10px;
@@ -5008,6 +4929,28 @@
 .agent-approval-actions {
   display: flex;
   gap: 7px;
+}
+
+/* ask_user: same card, blue instead of amber — it is a handoff, not a warning. */
+.agent-handoff {
+  background: rgba(34, 44, 66, 0.78);
+  border-color: rgba(126, 162, 248, 0.38);
+}
+
+.agent-handoff strong { color: #a9c1ff; }
+
+.agent-handoff-reply {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 9px;
+  padding: 7px 9px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.22);
+  color: #e9eef5;
+  font: inherit;
+  font-size: 12px;
+  resize: vertical;
 }
 
 .agent-approve,

@@ -11,6 +11,12 @@ export type AgentToolName =
   | 'fill'
   | 'type'
   | 'press_key'
+  | 'click_text'
+  | 'read_text'
+  | 'select_option'
+  | 'hover'
+  | 'go_back'
+  | 'ask_user'
   | 'navigate'
   | 'open_tab'
   | 'scroll'
@@ -80,6 +86,42 @@ export type AgentStepRecord = {
   step?: number
 }
 
+/** The agent's up-front analysis of the goal (POST /agent/analyze). */
+export type AgentTaskBrief = {
+  summary: string
+  task_type?: string
+  /** Acceptance criteria the finished task is checked against. */
+  requirements: string[]
+  plan?: string[]
+  /** Drafted content to enter (slides, letter, email body). */
+  content?: string
+  start_url?: string
+  risks?: string[]
+}
+
+/** What the latest refused self-check said is still missing. */
+export type AgentSelfCheckFeedback = {
+  attempt: number
+  missing: string[]
+  next_step?: string
+}
+
+export type AgentVerificationCheck = {
+  requirement: string
+  met: boolean
+  evidence: string
+}
+
+/** POST /agent/verify — an evidence-based judgement of a finish claim. */
+export type AgentVerification = {
+  complete: boolean
+  checks: AgentVerificationCheck[]
+  missing: string[]
+  next_step?: string
+  confidence: number
+  model?: string
+}
+
 export type AgentFailureRecord = {
   tool: string
   reason: string
@@ -105,6 +147,8 @@ export type AgentWorkingMemorySnapshot = {
   milestones?: string[]
   content_entered?: AgentContentEntry[]
   session_history?: AgentSessionTaskRecord[]
+  task_brief?: AgentTaskBrief
+  self_check?: AgentSelfCheckFeedback
 }
 
 export type AgentPlanRequest = {
@@ -129,6 +173,7 @@ export type AgentAbortReason =
   | 'declined'
   | 'step_limit'
   | 'cancelled'
+  | 'blocked'
 
 export type AgentTaskStatus = 'idle' | 'running' | 'completed' | 'failed'
 
@@ -138,4 +183,10 @@ export type AgentTaskResult = {
   message: string
   steps: number
   reason?: AgentAbortReason
+  /**
+   * Completed tasks only: true when the self-check confirmed every requirement,
+   * false when the agent finished without that confirmation.
+   */
+  verified?: boolean
+  checks?: AgentVerificationCheck[]
 }

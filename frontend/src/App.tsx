@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import sunSphereImage from './assets/sun-sphere.webp'
 // layout.css first: liquid-glass.css must load after it, as the shell's glass surfaces expect.
 import './styles/layout.css'
@@ -178,69 +178,7 @@ function StartupScreen({
   onStart: () => void
   isTransitioning: boolean
 }) {
-  const solarSystemRef = useRef<HTMLDivElement>(null)
   const [isGuideOpen, setIsGuideOpen] = useState(false)
-
-  // Cancel the mouse-follow rAF before the transition frame paints. This keeps
-  // it from competing with the solar-system burst as the swipe completes.
-  useLayoutEffect(() => {
-    // Captured once, so the cleanup resets the same node the loop moved.
-    const solarSystem = solarSystemRef.current
-    if (isTransitioning) {
-      solarSystem?.style.removeProperty('transform')
-      return
-    }
-
-    let active = true
-    let mouseX = 0
-    let mouseY = 0
-    let currentX = 0
-    let currentY = 0
-    let rafId: number | null = null
-
-    // Below this the movement is under a pixel and invisible, so the loop stops
-    // rather than committing a new transform on every frame forever. An idle
-    // welcome screen then costs the compositor nothing.
-    const SETTLE_THRESHOLD_PX = 0.15
-
-    const updatePosition = () => {
-      if (!active) return
-      rafId = null
-
-      const deltaX = mouseX - currentX
-      const deltaY = mouseY - currentY
-      currentX += deltaX * 0.08
-      currentY += deltaY * 0.08
-
-      if (solarSystem) {
-        solarSystem.style.transform = `translate3d(${currentX.toFixed(2)}px, ${currentY.toFixed(2)}px, 0)`
-      }
-
-      if (Math.abs(deltaX) > SETTLE_THRESHOLD_PX || Math.abs(deltaY) > SETTLE_THRESHOLD_PX) {
-        rafId = requestAnimationFrame(updatePosition)
-      }
-    }
-
-    const handleMouseMove = (e: MouseEvent) => {
-      const targetX = (e.clientX - window.innerWidth / 2) / (window.innerWidth / 2)
-      const targetY = (e.clientY - window.innerHeight / 2) / (window.innerHeight / 2)
-      mouseX = targetX * 180 // Prominent 180px follow displacement
-      mouseY = targetY * 180
-
-      if (rafId === null) {
-        rafId = requestAnimationFrame(updatePosition)
-      }
-    }
-
-    window.addEventListener('mousemove', handleMouseMove, { passive: true })
-
-    return () => {
-      active = false
-      window.removeEventListener('mousemove', handleMouseMove)
-      if (rafId !== null) cancelAnimationFrame(rafId)
-      solarSystem?.style.removeProperty('transform')
-    }
-  }, [isTransitioning])
 
   return (
     <main className={`startup-screen ${isTransitioning ? 'startup-screen--transitioning' : ''}`}>
@@ -282,19 +220,6 @@ function StartupScreen({
               loading="eager"
             />
           </div>
-
-          {/* Solar System Orbits */}
-          <div className="solar-system" ref={solarSystemRef}>
-            <div className="orbit orbit--1">
-              <div className="planet planet--1" />
-            </div>
-            <div className="orbit orbit--2">
-              <div className="planet planet--2" />
-            </div>
-            <div className="orbit orbit--3">
-              <div className="planet planet--3" />
-            </div>
-          </div>
         </div>
         <SlideStartButton onStart={onStart} />
       </section>
@@ -320,11 +245,12 @@ function App() {
     if (transitionState !== 'welcome') void BrowserShell.load()
   }, [transitionState])
 
+  // Matches startupFadeOut in layout.css: the welcome screen fades out, then the browser fades in.
   const handleStart = () => {
     setTransitionState('animating')
     setTimeout(() => {
       setTransitionState('blown')
-    }, 2000)
+    }, 450)
   }
 
   if (transitionState === 'blown') {

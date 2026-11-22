@@ -22,6 +22,38 @@ export interface ChatResponse {
   usage: { prompt_tokens: number; completion_tokens: number }
 }
 
+/**
+ * A planning-provider failure, classified so the agent can react correctly:
+ * `auth` (bad or revoked key — retrying cannot help), `rate_limit` (wait
+ * longer, then retry), `provider` (anything else — retry with backoff).
+ * The message keeps the provider's own reason, with anything key-like masked.
+ */
+export class PlannerProviderError extends Error {
+  constructor(readonly kind: 'auth' | 'rate_limit' | 'provider', message: string) {
+    super(message)
+    this.name = 'PlannerProviderError'
+  }
+
+  static from(exc: unknown, secrets: readonly string[] = []): PlannerProviderError {
+    let raw = exc instanceof Error ? exc.message : String(exc)
+    // The configured key itself, whatever its shape, before any pattern runs.
+    for (const secret of secrets) if (secret && secret.length >= 6) raw = raw.split(secret).join('***')
+    const detail = raw
+      .replace(/([?&](key|api_key|apikey|token)=)[^&\s"']+/gi, '$1***')
+      .replace(/\b(sk|pk|rk|AIza|nvapi|xai|gsk)[-_A-Za-z0-9]{12,}/g, '***')
+      .replace(/\bBearer\s+[-_.A-Za-z0-9]+/gi, 'Bearer ***')
+      .replace(/\s+/g, ' ')
+      .slice(0, 240)
+    if (/\((401|403)\)|authenticat|unauthori[sz]ed|invalid (api )?key|api key not valid|permission denied/i.test(raw)) {
+      return new PlannerProviderError('auth', `The AI provider rejected the API key: ${detail}`)
+    }
+    if (/\(429\)|rate.?limit|quota|too many requests|resource.?exhausted|\(529\)|overloaded/i.test(raw)) {
+      return new PlannerProviderError('rate_limit', `The AI provider is rate-limiting requests: ${detail}`)
+    }
+    return new PlannerProviderError('provider', `The AI provider returned an error: ${detail}`)
+  }
+}
+
 export class LlmProviderManager {
   private activeConfig: ProviderConfig | null = null
   private activeGateway: ProviderGateway | null = null
@@ -219,8 +251,8 @@ export class LlmProviderManager {
       try {
         const result = await this.activeGateway.chatCompletion(messages, { model: targetModel, temperature, maxTokens })
         return result.response
-      } catch {
-        throw new Error('Could not contact the planning provider. Check your API key and connection.')
+      } catch (exc) {
+        throw PlannerProviderError.from(exc, [this.activeConfig.api_key])
       }
     }
 

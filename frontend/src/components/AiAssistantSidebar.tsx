@@ -160,8 +160,7 @@ export const AiAssistantSidebar = memo(function AiAssistantSidebar({
   const panelRef = useRef<HTMLElement | null>(null)
   // A drag-resize hides the guest view; sampling it then would catch a blank frame.
   const resizingRef = useRef(false)
-  const backdropFrames = usePageBackdrop(panelRef, activeTargetId, !hasActivePage, resizingRef)
-  const backdrop = backdropFrames[backdropFrames.length - 1]
+  const { frames: backdropFrames, settle: settleBackdrop } = usePageBackdrop(panelRef, activeTargetId, !hasActivePage, resizingRef)
 
   // Automatically sync active chat session to state and localStorage
   useEffect(() => {
@@ -381,12 +380,24 @@ export const AiAssistantSidebar = memo(function AiAssistantSidebar({
       ref={panelRef}
       className="assistant-panel"
       aria-label="Kimo panel"
-      style={backdrop ? ({ '--backdrop-luminance': backdrop.luminance.toFixed(3) } as CSSProperties) : undefined}
     >
-      {/* The page beside the panel, blurred: the glass panel's backdrop. The
-          previous frame stays beneath while the new one fades in. */}
+      {/* The page beside the panel, blurred: the glass panel's backdrop. Each
+          frame carries its own tint and fades in with it over the previous
+          frame, which stays beneath until the fade has finished, so the
+          colour changes without a flash. */}
       <div className="assistant-backdrop" aria-hidden="true">
-        {backdropFrames.map((frame) => <img key={frame.key} src={frame.image} alt="" draggable={false} />)}
+        {backdropFrames.map((frame) => (
+          <div
+            key={frame.key}
+            className="assistant-backdrop-frame"
+            style={{ '--backdrop-luminance': frame.luminance.toFixed(3) } as CSSProperties}
+            onAnimationEnd={(event) => {
+              if (event.target === event.currentTarget) settleBackdrop(frame.key)
+            }}
+          >
+            <img src={frame.image} alt="" draggable={false} />
+          </div>
+        ))}
       </div>
       {/* Drag edge. `separator` + arrow keys keeps the panel resizable without
           a pointer. */}

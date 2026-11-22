@@ -2,6 +2,7 @@ import type { AXNode, AXProperty } from './pageInspector.js'
 import type {
   CheckedState,
   ElementHandle,
+  PagePopup,
   PageStateSnapshot,
   SemanticDialog,
   SemanticElement,
@@ -57,6 +58,26 @@ const CONTAINER_ROLES = new Set([
   'search',
   'tabpanel',
 ])
+
+/**
+ * Containers that sit over or beside the page rather than being part of it.
+ * A close button inside one of these closes a popup or a panel.
+ */
+const OVERLAY_ROLES = new Set(['dialog', 'alertdialog', 'tooltip', 'complementary'])
+
+/** Labels that close or decline something and commit nothing. Listed for the planner. */
+export const CLOSE_LABEL =
+  /^(got it|ok,? got it|dismiss|close|close (this |the )?(panel|sidebar|side panel|dialog|tips?|banner|popup|window|message|menu)|hide|no,? thanks|not now|maybe later|skip|skip (tour|for now|intro)|×|✕|✖|x)$/i
+
+/**
+ * The subset so harmless the loop clicks them unasked: they only acknowledge
+ * a tip or decline an offer. "Close" and "Skip" are deliberately absent — the
+ * agent may itself have opened the dialog they would close.
+ */
+export const AUTO_CLOSE_LABEL = /^(got it|ok,? got it|dismiss|no,? thanks|not now|maybe later|skip tour|skip for now|close tips?)$/i
+
+const MAX_POPUPS = 8
+const MAX_DEPTH = 60
 
 const MAX_ELEMENTS = 500
 const MAX_DIALOGS = 25
@@ -148,6 +169,21 @@ export function buildSemanticState(input: StateBuilderInput): BuiltState {
    */
   let recentText = ''
   let currentContainer = ''
+
+  // Parent links survive in the full tree (ignored nodes included), so each
+  // close button can be tied to the popup or panel it belongs to.
+  const byNodeId = new Map<string, AXNode>()
+  for (const node of input.nodes) if (typeof node.nodeId === 'string') byNodeId.set(node.nodeId, node)
+  const overlayOf = (node: AXNode): AXNode | null => {
+    let current = typeof node.parentId === 'string' ? byNodeId.get(node.parentId) : undefined
+    for (let depth = 0; current && depth < MAX_DEPTH; depth++) {
+      const role = typeof current.role?.value === 'string' ? current.role.value : ''
+      if (OVERLAY_ROLES.has(role) && !asBoolean(propertyMap(current).get('hidden'))) return current
+      current = typeof current.parentId === 'string' ? byNodeId.get(current.parentId) : undefined
+    }
+    return null
+  }
+  const popups = new Map<string, PagePopup>()
 
   for (const node of input.nodes) {
     if (node.ignored === true || typeof node.nodeId !== 'string') continue
@@ -251,6 +287,23 @@ export function buildSemanticState(input: StateBuilderInput): BuiltState {
       if (invalid) element.invalid = invalid
 
       elements.push(element)
+
+      if ((role === 'button' || role === 'link') && !element.disabled && CLOSE_LABEL.test(name)) {
+        const auto = AUTO_CLOSE_LABEL.test(name)
+        const overlay = overlayOf(node)
+        // A bare "Close" outside any popup or panel could close anything; only
+        // the unmistakable acknowledgements are listed without a container.
+        if (overlay || auto) {
+          const key = overlay?.nodeId ?? `loose:${element.container ?? ''}:${recentText}`
+          const popup = popups.get(key) ?? {
+            role: overlay ? String(overlay.role?.value ?? 'dialog') : 'tip',
+            name: normalizeText(overlay?.name?.value, MAX_NAME_LENGTH) || element.container || recentText.slice(0, 80) || '',
+            closeButtons: [],
+          }
+          popup.closeButtons.push({ id: elementId, name, auto })
+          if (popups.size < MAX_POPUPS || popups.has(key)) popups.set(key, popup)
+        }
+      }
     }
 
     if (isDialog && dialogs.length < MAX_DIALOGS) {
@@ -279,6 +332,7 @@ export function buildSemanticState(input: StateBuilderInput): BuiltState {
     selectedElementIds,
     truncated,
   }
+  if (popups.size > 0) state.popups = [...popups.values()]
 
   return { state, handles }
 }

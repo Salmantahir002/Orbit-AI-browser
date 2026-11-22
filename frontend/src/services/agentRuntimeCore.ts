@@ -1,13 +1,15 @@
 import type {
   AgentAbortReason,
   AgentPlanResponse,
+  AgentTaskBrief,
   AgentTaskResult,
   AgentToolCall,
+  AgentVerification,
 } from '../types/agentTypes'
 import type { PageStateSnapshot } from '../types/browserRuntimeTypes'
 import { approvalFor, type ApprovalHandler } from './agentApprovalPolicy'
 import { AgentWorkingMemory, CONTENT_MIN_CHARS, documentKey } from './agentWorkingMemory'
-import { AgentPlanError, requestPlan } from './agentApiClient'
+import { AgentPlanError, requestAnalysis, requestPlan, requestVerification } from './agentApiClient'
 import { extractPageState, invokeRuntime, isBrowserRuntimeAvailable, setAgentInputLock, setAgentOverlay } from './browserRuntime'
 import { isTerminalTool, resolveToolCall } from './agentToolRegistry'
 import { agentBrowserMemory } from './agentBrowserMemory'
@@ -36,6 +38,13 @@ export type AgentTaskEvents = {
   onAction?: (toolCall: AgentToolCall) => void
   onStep?: (step: number, toolCall: AgentToolCall, activity: { summary: string; detail: string }) => void
   onStatus?: (message: string) => void
+  /** The up-front analysis is ready: requirements, plan, drafted content. */
+  onAnalysis?: (brief: AgentTaskBrief) => void
+  /**
+   * A finish claim was checked. `rejected`: sent back to work on what is
+   * missing; `accepted`: verified; `unconfirmed`: finished without confirmation.
+   */
+  onVerification?: (verification: AgentVerification, outcome: 'accepted' | 'rejected' | 'unconfirmed') => void
 }
 
 export type AgentTaskOptions = {
@@ -48,10 +57,34 @@ export type AgentTaskOptions = {
   visualFeedback?: boolean
   onApprovalRequest?: ApprovalHandler
   onOpenTab?: (url?: string) => Promise<number | null>
+  /**
+   * Hands the tab to the user (sign-in, CAPTCHA, a choice) and resolves with
+   * their reply, or null if they chose to stop. Omitted: ask_user is refused.
+   */
+  onUserInput?: (request: { question: string }) => Promise<string | null>
+  /**
+   * Returns (and forgets) the tabs that `openerTargetId` opened since the last
+   * call — a link with target=_blank, window.open. The loop follows the newest.
+   */
+  takeOpenedTabs?: (openerTargetId: number) => number[]
 }
 
 /** One planning round trip may queue several actions; each still costs one step. */
 const DEFAULT_MAX_STEPS = 150
+
+/**
+ * How many times the self-check may send a finish claim back. After that the
+ * task ends anyway, reported as not verified, rather than looping on a
+ * requirement the reviewer cannot see evidence for.
+ */
+const MAX_VERIFICATION_REJECTIONS = 3
+
+/** The text `readText` returned, or '' when it is unavailable. */
+function observedText(value: unknown): string {
+  if (!value || typeof value !== 'object') return ''
+  const record = value as Record<string, unknown>
+  return typeof record.text === 'string' ? record.text : ''
+}
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError'
@@ -106,6 +139,8 @@ export class AgentTask {
   private readonly visualFeedback: boolean
   private readonly onApprovalRequest?: ApprovalHandler
   private readonly onOpenTab?: (url?: string) => Promise<number | null>
+  private readonly onUserInput?: (request: { question: string }) => Promise<string | null>
+  private readonly takeOpenedTabs?: (openerTargetId: number) => number[]
 
   private readonly memory: AgentWorkingMemory
   private stepCount = 0
@@ -142,6 +177,11 @@ export class AgentTask {
   private guardRejectionStreak = 0
   private static readonly MAX_GUARD_REJECTIONS = 6
   private sessionRecorded = false
+  private analysed = false
+  private verificationRejections = 0
+  /** Popups already closed (or tried) once, so one that keeps returning cannot loop. */
+  private readonly dismissedPopups = new Set<string>()
+  private static readonly MAX_AUTO_DISMISS_PER_PASS = 3
 
   /** Builds an action signature to detect repetitive non-progressing actions. */
   private buildActionSignature(toolCall: AgentToolCall, pageState: PageStateSnapshot): string {
@@ -168,7 +208,7 @@ export class AgentTask {
    */
   private detectStagnation(toolCall: AgentToolCall, pageState: PageStateSnapshot): boolean {
     // Repeated sampling and wheel events are normal for virtualized content.
-    if (['evaluate', 'element_bounds', 'dispatch_mouse_event', 'extract_virtual_table', 'scroll'].includes(toolCall.tool)) return false
+    if (['evaluate', 'element_bounds', 'dispatch_mouse_event', 'extract_virtual_table', 'scroll', 'read_text', 'hover'].includes(toolCall.tool)) return false
     const exact = AgentTask.pushWindow(this.actionHistory, this.buildActionSignature(toolCall, pageState), AgentTask.STAGNATION_WINDOW)
     const intent = AgentTask.pushWindow(this.intentHistory, this.buildIntentSignature(toolCall, pageState), AgentTask.INTENT_WINDOW)
     return exact >= AgentTask.STAGNATION_THRESHOLD || intent >= AgentTask.INTENT_THRESHOLD
@@ -202,6 +242,8 @@ export class AgentTask {
     this.visualFeedback = options.visualFeedback !== false
     this.onApprovalRequest = options.onApprovalRequest
     this.onOpenTab = options.onOpenTab
+    this.onUserInput = options.onUserInput
+    this.takeOpenedTabs = options.takeOpenedTabs
     this.memory = new AgentWorkingMemory(this.goal, agentSessionMemory.history())
   }
 
@@ -231,8 +273,13 @@ export class AgentTask {
           const errorMsg = 'error' in stateResult && stateResult.error ? stateResult.error.message : 'Unknown error'
           return this.finalResult('failed', `Could not read the page: ${errorMsg}`, 'action_failed')
         }
-        const pageState = stateResult.data
+        const pageState = await this.dismissPopups(stateResult.data)
         this.memory.setCurrentPage(pageState.url)
+
+        if (!this.analysed) {
+          const stopped = await this.analyse(pageState)
+          if (stopped) return stopped
+        }
 
         let plan: AgentPlanResponse
         try {
@@ -252,8 +299,15 @@ export class AgentTask {
               return this.finalResult('failed', `The planner kept failing: ${error.message}`, 'planner_failed')
             }
 
-            const backoffMs = Math.min(500 * Math.pow(1.5, this.plannerFailureStreak - 1), 4000)
-            this.events.onStatus?.(`Planner error, retrying: ${error.message}`)
+            const rateLimited = error.kind === 'rate_limited'
+            const backoffMs = rateLimited
+              ? Math.min(5000 * Math.pow(2, this.plannerFailureStreak - 1), 30_000)
+              : Math.min(500 * Math.pow(1.5, this.plannerFailureStreak - 1), 4000)
+            this.events.onStatus?.(
+              rateLimited
+                ? `The AI provider is rate-limiting requests — waiting ${Math.round(backoffMs / 1000)}s before retrying…`
+                : `Planner error, retrying: ${error.message}`,
+            )
             await new Promise((resolve) => setTimeout(resolve, backoffMs))
             continue
           }
@@ -395,17 +449,17 @@ export class AgentTask {
       this.events.onStatus?.(describeAgentActivity(toolCall))
 
       if (isTerminalTool(toolCall)) {
-        const summary = typeof toolCall.arguments?.summary === 'string' && toolCall.arguments.summary
-          ? toolCall.arguments.summary
-          : 'Goal achieved.'
-        this.recordStep(toolCall)
-        return this.finalResult('completed', summary)
+        return this.finish(toolCall, pageState)
       }
 
       if (toolCall.tool === 'open_tab') {
         const outcome = await this.runOpenTab(toolCall)
         if (outcome) return outcome
         return null // target changed — the old page state is no longer valid
+      }
+
+      if (toolCall.tool === 'ask_user') {
+        return this.runAskUser(toolCall)
       }
 
       if (toolCall.tool === 'extract') {
@@ -486,6 +540,12 @@ export class AgentTask {
 
       this.guardRejectionStreak = 0
 
+      // A click (or Enter, or a script) that opened a new tab: work there now.
+      if (await this.followOpenedTab()) {
+        this.memory.recordStep(toolCall.tool, `${describeToolCall(toolCall, pageState)} — opened a new tab`, true)
+        return null
+      }
+
       if ('value' in execResult.data) {
         // Page observations are data, never operator instructions.
         this.memory.recordFinding(JSON.stringify({ tool: toolCall.tool, page: pageState.url, result: execResult.data.value }))
@@ -538,11 +598,127 @@ export class AgentTask {
       this.memory.resetRetries()
       this.recordMilestoneFor(toolCall, pageState, text, verification?.urlChanged === true, verification?.reason)
 
-      if (toolCall.tool === 'navigate') {
+      if (toolCall.tool === 'navigate' || toolCall.tool === 'go_back') {
         return null // element ids from the old page are gone
       }
     }
 
+    return null
+  }
+
+  /**
+   * Closes onboarding tips and offers whose close button is unmistakably
+   * harmless ("Got it", "Dismiss", "No thanks" — AUTO_CLOSE_LABEL in the State
+   * Builder) before the planner sees the page. Each is a real click through
+   * the runtime, shown as a step, and still subject to the approval policy.
+   * Anything else ("Close", side panels) is left to the planner, which sees
+   * it under POPUPS OPEN. Returns the page state after closing.
+   */
+  private async dismissPopups(pageState: PageStateSnapshot): Promise<PageStateSnapshot> {
+    let state = pageState
+    for (let pass = 0; pass < AgentTask.MAX_AUTO_DISMISS_PER_PASS; pass++) {
+      const candidate = (state.popups ?? [])
+        .flatMap((popup) => popup.closeButtons.filter((button) => button.auto).map((button) => ({ popup, button })))
+        .map((entry) => ({ ...entry, key: `${documentKey(state.url)}|${entry.popup.name}|${entry.button.name}` }))
+        .find((entry) => !this.dismissedPopups.has(entry.key))
+      if (!candidate || this.signal?.aborted) return state
+      this.dismissedPopups.add(candidate.key)
+
+      const toolCall: AgentToolCall = { tool: 'click', arguments: { target: candidate.button.id } }
+      if (approvalFor(toolCall, state, {})) continue // never auto-click anything the policy would question
+
+      const label = candidate.popup.name ? `"${candidate.popup.name.slice(0, 60)}"` : 'a popup'
+      this.currentPlanSummary = 'Closing a popup that is in the way'
+      this.currentActionDetail = `${candidate.button.name} · ${label}`
+      this.events.onStatus?.(`Closing ${label} (${candidate.button.name})…`)
+      const clicked = await invokeRuntime(this.targetId, 'click', { elementId: candidate.button.id })
+      this.recordStep(toolCall)
+      if (clicked.ok) {
+        this.memory.recordMilestone(`Closed ${label} with "${candidate.button.name}" so it does not get in the way`)
+        this.memory.recordStep('click', `Closed ${label} with "${candidate.button.name}"`, true)
+      }
+
+      const fresh = await extractPageState(this.targetId)
+      if (!fresh.ok) return state
+      state = fresh.data
+    }
+    return state
+  }
+
+  /**
+   * Switches the task to the newest tab its own tab opened since the last
+   * check. Tabs the user opened themselves are never followed: only popups
+   * whose opener is the tab the agent is driving are reported.
+   */
+  private async followOpenedTab(): Promise<boolean> {
+    const opened = this.takeOpenedTabs?.(this.targetId) ?? []
+    for (const candidate of [...opened].reverse()) {
+      if (!(await this.waitForTarget(candidate))) continue
+      await setAgentInputLock(this.targetId, false)
+      if (this.visualFeedback) await setAgentOverlay(this.targetId, false).catch(() => undefined)
+      this.targetId = candidate
+      await setAgentInputLock(this.targetId, true)
+      if (this.visualFeedback) await setAgentOverlay(this.targetId, true).catch(() => undefined)
+      const described = await invokeRuntime(candidate, 'describeTarget', {})
+      const url = described.ok ? described.data.url : 'a new tab'
+      this.memory.recordMilestone(`The page opened a new tab (${url}); now working in that tab`)
+      this.events.onStatus?.('A new tab opened — continuing there…')
+      this.memory.resetRetries()
+      return true
+    }
+    return false
+  }
+
+  /** A popup's runtime session attaches a moment after the tab appears. */
+  private async waitForTarget(targetId: number): Promise<boolean> {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const described = await invokeRuntime(targetId, 'describeTarget', {})
+      if (described.ok && described.data.attached) return true
+      if (this.signal?.aborted) return false
+      await new Promise((resolve) => setTimeout(resolve, 150))
+    }
+    return false
+  }
+
+  /**
+   * Hands the tab to the user: their input is unlocked, the question is shown,
+   * and the task resumes with their reply. The reply is the user's own words,
+   * so it is recorded as a milestone the planner and the self-check both see.
+   */
+  private async runAskUser(toolCall: AgentToolCall): Promise<ActionOutcome> {
+    const question = typeof toolCall.arguments?.question === 'string' && toolCall.arguments.question.trim()
+      ? toolCall.arguments.question.trim().slice(0, 500)
+      : 'Please take over in this tab, then press Continue.'
+    this.recordStep(toolCall)
+
+    if (!this.onUserInput) {
+      this.memory.recordFailure('ask_user', 'Nobody can be asked here. Finish with status "blocked" and say what the user must do.')
+      return null
+    }
+
+    await setAgentInputLock(this.targetId, false)
+    if (this.visualFeedback) await setAgentOverlay(this.targetId, false).catch(() => undefined)
+    this.events.onStatus?.(`Waiting for you: ${question}`)
+
+    let reply: string | null
+    try {
+      reply = await this.onUserInput({ question })
+    } finally {
+      if (!this.signal?.aborted) {
+        await setAgentInputLock(this.targetId, true)
+        if (this.visualFeedback) await setAgentOverlay(this.targetId, true).catch(() => undefined)
+      }
+    }
+    if (this.signal?.aborted) return this.finalResult('failed', 'Task was stopped by the user.', 'cancelled')
+    if (reply === null) return this.finalResult('failed', `Stopped at your request while waiting for: ${question}`, 'declined')
+
+    // Popups the user opened while signing in are theirs, not the agent's.
+    this.takeOpenedTabs?.(this.targetId)
+    const answer = reply.trim() || 'done'
+    this.memory.recordMilestone(`Asked the user: "${question.slice(0, 120)}" — the user replied: "${answer.slice(0, 300)}"`)
+    this.memory.recordStep('ask_user', `The user handled it and replied: "${answer.slice(0, 120)}"`, true)
+    this.memory.resetRetries()
+    this.guardRejectionStreak = 0
     return null
   }
 
@@ -573,6 +749,22 @@ export class AgentTask {
       return
     }
 
+    if (toolCall.tool === 'type' && text !== null) {
+      // Short text (a slide title, a cell) is below the content ledger's
+      // threshold but is still progress the planner must not lose track of.
+      const label = this.targetLabel(targetId, pageState)
+      this.memory.recordMilestone(
+        `Typed "${text.replace(/\s+/g, ' ').slice(0, 80)}"${label ? ` into ${label}` : ''} on ${documentKey(pageState.url)}`,
+      )
+      return
+    }
+
+    if (toolCall.tool === 'press_key' && typeof args.key === 'string' && args.key.length > 1 && args.key.includes('+')) {
+      // Shortcuts create things (Control+m adds a slide); keep a durable count.
+      this.memory.recordMilestone(`Pressed shortcut ${args.key} on ${documentKey(pageState.url)}`)
+      return
+    }
+
     if (toolCall.tool === 'fill' && text !== null) {
       // The runtime's reason carries outcomes the page state cannot show, such
       // as an address that became a recipient chip and left its field empty.
@@ -587,9 +779,118 @@ export class AgentTask {
       return
     }
 
+    if (toolCall.tool === 'go_back') {
+      this.memory.recordMilestone(`Went back from ${documentKey(pageState.url)}`)
+      return
+    }
+
+    if (toolCall.tool === 'select_option' && typeof args.option === 'string') {
+      this.memory.recordMilestone(
+        `Chose "${args.option.slice(0, 60)}" in ${this.targetLabel(targetId, pageState) ?? 'a dropdown'}${reason ? ` — ${reason}` : ''}`,
+      )
+      return
+    }
+
     if (toolCall.tool === 'click' && urlChanged) {
       this.memory.recordMilestone(`Clicked ${this.targetLabel(targetId, pageState) ?? 'an element'} on ${documentKey(pageState.url)} — page changed to a new URL`)
     }
+  }
+
+  /**
+   * ANALYSE: before the first action, turn the goal into a brief. Fails open:
+   * without a brief the planner still works step by step, as it always did.
+   */
+  private async analyse(pageState: PageStateSnapshot): Promise<AgentTaskResult | null> {
+    this.analysed = true
+    this.events.onStatus?.('Analysing the task: requirements, plan and content…')
+    try {
+      const { brief } = await requestAnalysis(this.goal, pageState, this.memory.sessionTasks, this.signal)
+      this.memory.setTaskBrief(brief)
+      this.events.onAnalysis?.(brief)
+    } catch (error) {
+      if (this.signal?.aborted || isAbortError(error)) {
+        return this.finalResult('failed', 'Task was stopped by the user.', 'cancelled')
+      }
+      if (error instanceof AgentPlanError && error.kind === 'unavailable') {
+        return this.finalResult('failed', error.message, 'planner_failed')
+      }
+      this.events.onStatus?.('Task analysis was unavailable — planning step by step instead.')
+    }
+    return null
+  }
+
+  /**
+   * VERIFY: a finish claim is only accepted once an independent check of the
+   * evidence (fresh page state + visible page text + the task's own records)
+   * confirms every requirement. Otherwise the gaps go back into working memory
+   * and planning continues.
+   */
+  private async finish(toolCall: AgentToolCall, plannedState: PageStateSnapshot): Promise<ActionOutcome> {
+    const summary = typeof toolCall.arguments?.summary === 'string' && toolCall.arguments.summary
+      ? toolCall.arguments.summary
+      : 'Goal achieved.'
+
+    if (toolCall.arguments?.status === 'blocked') {
+      this.recordStep(toolCall)
+      return this.finalResult('failed', summary, 'blocked')
+    }
+
+    this.events.onStatus?.('Self-check: verifying the result against every requirement…')
+    const fresh = await extractPageState(this.targetId)
+    // Leave the page clean: a tip that appeared late is closed before judging.
+    const evidenceState = fresh.ok ? await this.dismissPopups(fresh.data) : plannedState
+    const textResult = await invokeRuntime(this.targetId, 'readText', {})
+    const pageText = textResult.ok ? observedText(textResult.data.value) : ''
+
+    let verdict: AgentVerification
+    try {
+      try {
+        verdict = await requestVerification(this.goal, summary, this.memory, evidenceState, pageText, this.signal)
+      } catch (first) {
+        if (!(first instanceof AgentPlanError && first.kind === 'rate_limited')) throw first
+        this.events.onStatus?.('Self-check: the AI provider is rate-limiting — retrying in 8s…')
+        await new Promise((resolve) => setTimeout(resolve, 8000))
+        verdict = await requestVerification(this.goal, summary, this.memory, evidenceState, pageText, this.signal)
+      }
+    } catch (error) {
+      if (this.signal?.aborted || isAbortError(error)) {
+        return this.finalResult('failed', 'Task was stopped by the user.', 'cancelled')
+      }
+      const reason = error instanceof Error ? error.message : 'unknown error'
+      this.recordStep(toolCall)
+      return this.finalResult('completed', `${summary}\n\n(Self-check unavailable: ${reason})`, undefined, { verified: false })
+    }
+
+    if (verdict.complete) {
+      this.memory.setSelfCheck(null)
+      this.events.onVerification?.(verdict, 'accepted')
+      this.recordStep(toolCall)
+      return this.finalResult('completed', summary, undefined, { verified: true, checks: verdict.checks })
+    }
+
+    this.verificationRejections += 1
+    if (this.verificationRejections > MAX_VERIFICATION_REJECTIONS) {
+      this.events.onVerification?.(verdict, 'unconfirmed')
+      this.recordStep(toolCall)
+      return this.finalResult(
+        'completed',
+        `${summary}\n\nThe self-check could not confirm: ${verdict.missing.join('; ')}`,
+        undefined,
+        { verified: false, checks: verdict.checks },
+      )
+    }
+
+    this.events.onVerification?.(verdict, 'rejected')
+    this.memory.setSelfCheck({ attempt: this.verificationRejections, missing: verdict.missing, next_step: verdict.next_step })
+    this.memory.recordFailure(
+      'finish',
+      `SELF-CHECK REJECTED the finish: still missing ${verdict.missing.join('; ')}` +
+        (verdict.next_step ? `. Suggested next step: ${verdict.next_step}` : ''),
+      'VERIFICATION_FAILED',
+    )
+    this.memory.recordStep('finish', `Claimed done; the self-check found work still missing (${verdict.missing.length} item(s)).`, false)
+    this.events.onStatus?.(`Self-check: not done yet — ${verdict.missing[0] ?? 'requirements unmet'}. Continuing…`)
+    return null
   }
 
   private async runOpenTab(toolCall: AgentToolCall): Promise<AgentTaskResult | null> {
@@ -656,6 +957,7 @@ export class AgentTask {
     status: AgentTaskResult['status'],
     message: string,
     reason?: AgentAbortReason,
+    review: Pick<AgentTaskResult, 'verified' | 'checks'> = {},
   ): AgentTaskResult {
     // Every exit path funnels through here, so this is where the task's own
     // record is handed to session memory for any follow-up goal.
@@ -669,6 +971,6 @@ export class AgentTask {
         finalUrl: this.memory.page,
       })
     }
-    return { taskId: this.taskId, status, message, steps: this.stepCount, reason }
+    return { taskId: this.taskId, status, message, steps: this.stepCount, reason, ...review }
   }
 }

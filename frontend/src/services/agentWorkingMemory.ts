@@ -2,8 +2,10 @@ import type {
   AgentContentEntry,
   AgentFailureRecord,
   AgentProgressItem,
+  AgentSelfCheckFeedback,
   AgentSessionTaskRecord,
   AgentStepRecord,
+  AgentTaskBrief,
   AgentWorkingMemorySnapshot,
 } from '../types/agentTypes'
 
@@ -173,6 +175,8 @@ export class AgentWorkingMemory {
   private milestones: string[] = []
   private contentLedger: LedgerEntry[] = []
   private readonly sessionHistory: AgentSessionTaskRecord[]
+  private taskBrief: AgentTaskBrief | null = null
+  private selfCheck: AgentSelfCheckFeedback | null = null
 
   constructor(goal: string, sessionHistory: readonly AgentSessionTaskRecord[] = []) {
     this.goal = goal.trim()
@@ -285,6 +289,27 @@ export class AgentWorkingMemory {
     return Boolean(elementId && this.invalidElements.has(elementId.trim()))
   }
 
+  /** The up-front analysis. Its plan seeds the checklist until the planner restates it. */
+  setTaskBrief(brief: AgentTaskBrief): void {
+    this.taskBrief = brief
+    if (this.planProgress.length === 0 && brief.plan && brief.plan.length > 0) {
+      this.setPlanProgress(brief.plan.map((step, index) => ({ step, status: index === 0 ? 'in_progress' : 'todo' })))
+    }
+  }
+
+  get brief(): AgentTaskBrief | null {
+    return this.taskBrief
+  }
+
+  get sessionTasks(): readonly AgentSessionTaskRecord[] {
+    return this.sessionHistory
+  }
+
+  /** What the latest refused self-check found missing; null clears it. */
+  setSelfCheck(feedback: AgentSelfCheckFeedback | null): void {
+    this.selfCheck = feedback
+  }
+
   setLastThought(thought: string): void {
     this.lastThought = (thought ?? '').trim().slice(0, 500)
   }
@@ -363,6 +388,8 @@ export class AgentWorkingMemory {
       milestones: [...this.milestones],
       content_entered: this.contentLedger.map(publicEntry),
       session_history: [...this.sessionHistory],
+      task_brief: this.taskBrief ?? undefined,
+      self_check: this.selfCheck ?? undefined,
     }
   }
 }

@@ -127,16 +127,25 @@
 /* ── The page beneath the assistant panel (see usePageBackdrop) ──
    A tiny frame of the page beside the panel, mirrored so its edge meets the
    page's edge at the seam, blown up and blurred into light and colour: the
-   panel reads as a pane of glass over the page rather than a grey slab. Each
-   new frame fades in over the last. The veil over it is the glass's own
-   smoke, thicker over bright pages (--backdrop-luminance) so white text stays
-   legible. */
+   panel reads as a pane of glass over the page rather than a grey slab. The
+   veil over it is the glass's own smoke, thicker over bright pages
+   (--backdrop-luminance) so white text stays legible.
+   Each frame carries its own veil and the two fade in together over the
+   previous frame and its veil. A single shared veil switched to the new
+   luminance at once while the old frame was still showing: from a bright
+   page to a dark one it thinned over a still-bright frame, a white flash. */
 .assistant-backdrop {
   position: absolute;
   inset: 0;
   z-index: -1;
   overflow: hidden;
   pointer-events: none;
+}
+
+.assistant-backdrop-frame {
+  position: absolute;
+  inset: 0;
+  animation: assistant-backdrop-in 0.9s ease both;
 }
 
 .assistant-backdrop img {
@@ -147,7 +156,6 @@
   object-fit: cover;
   transform: scaleX(-1);
   filter: blur(34px) saturate(1.35);
-  animation: assistant-backdrop-in 0.9s ease both;
 }
 
 @keyframes assistant-backdrop-in {
@@ -155,17 +163,25 @@
   to { opacity: 1; }
 }
 
+.assistant-backdrop-frame::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(16, 16, 20, calc(0.36 + 0.4 * var(--backdrop-luminance, 0.5)));
+}
+
+/* The top sheen is the glass's, not the page's: drawn once, over every frame. */
 .assistant-backdrop::after {
   content: '';
   position: absolute;
   inset: 0;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 30%),
-    rgba(16, 16, 20, calc(0.36 + 0.4 * var(--backdrop-luminance, 0.5)));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 30%);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .assistant-backdrop img {
-    animation: none;
+  /* Near-instant rather than none, so animationend still fires and the
+     frames beneath are released. */
+  .assistant-backdrop-frame {
+    animation-duration: 0.01ms;
   }
 }

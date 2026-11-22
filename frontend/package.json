@@ -24,6 +24,7 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:audio": "npm run build && playwright test e2e/liveTranscription.spec.ts --reporter=list",
+    "test:agent": "node ../backend-node/node_modules/vitest/vitest.mjs run --config ../backend-node/vitest.config.ts test/agentAnalyseVerifyLoop.test.ts test/agentPopups.test.ts",
     "test:providers": "node ../backend-node/node_modules/vitest/vitest.mjs run --config ../backend-node/vitest.config.ts test/providerSecureStore.test.ts test/providerApiClient.test.ts",
     "test": "npm run build && npm run test:e2e"
   },

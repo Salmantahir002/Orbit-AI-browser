@@ -129,7 +129,12 @@ describe('active provider lifecycle', () => {
     }
     await app.inject({ method: 'POST', url: `${PREFIX}/providers/active`, payload: config })
     expect((await llmProviderManager.chat({ prompt: 'Hello' })).response).not.toContain(key)
-    await expect(llmProviderManager.planChat({ messages: [] })).rejects.toThrow('Could not contact the planning provider')
+    // Planning errors now carry the provider's reason (so the agent can tell a
+    // bad key from a rate limit) — with the key itself masked.
+    const planError = await llmProviderManager.planChat({ messages: [] }).catch((error: Error) => error)
+    expect(planError).toBeInstanceOf(Error)
+    expect((planError as Error).message).toContain('AI provider')
+    expect((planError as Error).message).not.toContain(key)
   })
 
   it('set, get, then clear', async () => {

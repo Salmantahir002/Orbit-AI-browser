@@ -155,36 +155,46 @@ function HomePage({ onSearch, zoom = 100 }: HomePageProps) {
       ) : null}
 
       {isSearchOpen ? (
+        // The outer box only places the popup; the glass surfaces are inside
+        // it, their transforms owned by LiquidGlass's springs. The suggestions
+        // are a second pane of glass hanging below the field.
         <div className="homepage-search-popup" role="dialog" aria-modal="true" aria-label="Search Google">
-          <form onSubmit={handleSubmit}>
-            <SearchIcon />
-            <input
-              ref={inputRef}
-              aria-autocomplete="list"
-              aria-controls="homepage-search-suggestions"
-              aria-expanded={visibleSuggestions.length > 0}
-              autoComplete="off"
-              onChange={(event) => setSearchQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') {
-                  dismissSearch()
-                }
-              }}
-              placeholder="Search anything"
-              value={searchQuery}
-            />
-            <button className="homepage-search-submit" type="submit" aria-label="Search Google">
-              <ArrowIcon />
-            </button>
-          </form>
+          <div className="homepage-search-glass lg-host">
+            <LiquidGlass refraction={52} bezel={14} blur={3} saturation={170} aberration={1.2} elasticity={0.08} />
+            <form onSubmit={handleSubmit}>
+              <SearchIcon />
+              <input
+                ref={inputRef}
+                aria-autocomplete="list"
+                aria-controls="homepage-search-suggestions"
+                aria-expanded={visibleSuggestions.length > 0}
+                autoComplete="off"
+                onChange={(event) => setSearchQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    dismissSearch()
+                  }
+                }}
+                placeholder="Search anything"
+                value={searchQuery}
+              />
+              <button className="homepage-search-submit lg-host" type="submit" aria-label="Search Google">
+                <LiquidGlass refraction={20} bezel={9} blur={2} saturation={160} aberration={0} elasticity={0.2} />
+                <ArrowIcon />
+              </button>
+            </form>
+          </div>
           {visibleSuggestions.length > 0 ? (
-            <div className="homepage-suggestions" id="homepage-search-suggestions" role="listbox">
-              {visibleSuggestions.map((suggestion) => (
-                <button key={suggestion} type="button" role="option" onClick={() => submitSearch(suggestion)}>
-                  <SearchIcon />
-                  <span>{suggestion}</span>
-                </button>
-              ))}
+            <div className="homepage-suggestions lg-host">
+              <LiquidGlass refraction={52} bezel={16} blur={3} saturation={170} aberration={1.2} />
+              <div className="homepage-suggestions-list" id="homepage-search-suggestions" role="listbox">
+                {visibleSuggestions.map((suggestion) => (
+                  <button key={suggestion} type="button" role="option" onClick={() => submitSearch(suggestion)}>
+                    <SearchIcon />
+                    <span>{suggestion}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           ) : null}
         </div>

@@ -1,4 +1,7 @@
-import { useEffect, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useState, type RefObject } from 'react'
+
+/** Frames kept at most: the settled one plus any still fading in over it. */
+const MAX_FRAMES = 4
 
 export type PageBackdrop = {
   /** Bumped per new frame, so each one can fade in over the last. */
@@ -19,14 +22,15 @@ const SETTLE_MS = 450
  * Frames are taken only while the panel is showing, the window is in front
  * and `pausedRef` is false (a drag-resize hides the guest view). On the home
  * page, which the shell draws itself, the shell's page area is sampled instead.
- * Returns the latest frame last, preceded by the one it is fading in over.
+ * Returns the frames oldest first (the latest last, fading in over the ones
+ * before it) and `settle`, to call when a frame's fade-in has finished.
  */
 export function usePageBackdrop(
   panelRef: RefObject<HTMLElement | null>,
   targetId: number | null,
   isHomePage: boolean,
   pausedRef: RefObject<boolean>,
-): PageBackdrop[] {
+): { frames: PageBackdrop[]; settle: (key: number) => void } {
   const [frames, setFrames] = useState<PageBackdrop[]>([])
 
   useEffect(() => {
@@ -61,7 +65,9 @@ export function usePageBackdrop(
       setFrames((previous) => {
         const latest = previous[previous.length - 1]
         if (latest?.image === next.image) return previous
-        return [...previous.slice(-1), { key: (latest?.key ?? 0) + 1, ...next }]
+        // Older frames stay beneath until the new one has finished fading in
+        // (`settle`); dropping one mid-fade would show the bare panel through.
+        return [...previous.slice(-(MAX_FRAMES - 1)), { key: (latest?.key ?? 0) + 1, ...next }]
       })
     }
     const captureSoon = () => {
@@ -90,5 +96,13 @@ export function usePageBackdrop(
     }
   }, [panelRef, targetId, isHomePage, pausedRef])
 
-  return frames
+  /** Call once frame `key` is fully shown: the frames under it are hidden and can go. */
+  const settle = useCallback((key: number) => {
+    setFrames((previous) => {
+      const index = previous.findIndex((frame) => frame.key === key)
+      return index > 0 ? previous.slice(index) : previous
+    })
+  }, [])
+
+  return { frames, settle }
 }

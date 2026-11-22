@@ -110,16 +110,58 @@ const TOOL_SPECS: readonly ToolSpec[] = [
   spec({
     name: 'press_key',
     description:
-      'Press a single key inside the page, e.g. Enter, Tab, Escape, ArrowDown. ' +
-      "Use 'Enter' after 'fill' to submit a search. " +
-      'Browser-level shortcuts such as Control+t or Control+w have no effect here ' +
-      '— use open_tab to open a tab.',
-    parameters: [param('key', 'string', true, 'Key name')],
+      'Press a key or a keyboard shortcut inside the page, e.g. Enter, Tab, Escape, ArrowDown, ' +
+      'or an app shortcut written with + such as Control+m (new slide in Google Slides), ' +
+      'Control+b (bold), Control+Enter, Control+Shift+8 (bulleted list in Google Docs). ' +
+      "Use 'Enter' after 'fill' to submit a search. Browser shortcuts (Control+t, Control+w, " +
+      'Control+l, Control+p, zoom) are refused — use open_tab or navigate instead.',
+    parameters: [param('key', 'string', true, 'Key name or shortcut such as Control+m')],
+  }),
+  spec({
+    name: 'click_text',
+    description:
+      'Click visible text that has NO element id in the page state — text drawn in SVG or app ' +
+      'canvases, e.g. the Google Slides placeholders "Click to add title" / "Click to add text". ' +
+      'Matches case-insensitively; if several match, the largest visible one is clicked unless nth is given. ' +
+      'Prefer click with an element id whenever the control is listed.',
+    parameters: [
+      param('text', 'string', true, 'The visible text to click (short and exact)'),
+      param('nth', 'number', false, '1-based match number in document order'),
+    ],
+  }),
+  spec({
+    name: 'read_text',
+    description:
+      'Read the visible text of the page (including SVG text such as every slide in a Google ' +
+      'Slides filmstrip) into working memory, to check what is really on the page. Optional ' +
+      'selector limits it to one element. Use it to verify your work before finishing.',
+    parameters: [param('selector', 'string', false, 'CSS selector to read only part of the page')],
+  }),
+  spec({
+    name: 'select_option',
+    description:
+      'Choose an option in a dropdown (native <select>, or a custom combobox/listbox) by its visible ' +
+      'label or value, e.g. a country, a size, a sort order, a month. Opens and picks it in one step; ' +
+      'if the option is not found the result lists the available options.',
+    parameters: [
+      param('target', 'element_id', true, 'Element id of the dropdown / combobox'),
+      param('option', 'string', true, 'Visible label (or value) of the option to choose'),
+    ],
+  }),
+  spec({
+    name: 'hover',
+    description: 'Move the mouse over an element without clicking, to open hover menus or tooltips.',
+    parameters: [param('target', 'element_id', true, 'Element id to hover over')],
   }),
   spec({
     name: 'navigate',
     description: 'Load a new http(s) url.',
     parameters: [param('url', 'url', true, 'Absolute http or https url')],
+  }),
+  spec({
+    name: 'go_back',
+    description: "Go back to the previous page in this tab's history (the browser Back button).",
+    parameters: [],
   }),
   spec({
     name: 'open_tab',
@@ -171,9 +213,26 @@ const TOOL_SPECS: readonly ToolSpec[] = [
     handledByLoop: true,
   }),
   spec({
+    name: 'ask_user',
+    description:
+      'Pause and hand control to the user when only they can continue: sign in, a CAPTCHA, a ' +
+      'two-factor code, a payment step, or a choice the goal does not settle. The tab is unlocked ' +
+      'for them; the task resumes with their reply when they press Continue. Ask one clear question.',
+    parameters: [param('question', 'string', true, 'What the user needs to do or decide')],
+    category: 'human',
+    handledByLoop: true,
+  }),
+  spec({
     name: 'finish',
-    description: 'The goal is complete, or cannot be completed. Always end with this.',
-    parameters: [param('summary', 'string', true, 'Outcome for the user')],
+    description:
+      'End the task. status "done" when the goal is achieved (an independent self-check then ' +
+      'verifies it against the requirements, and sends you back if anything is missing); ' +
+      'status "blocked" when it cannot be completed (sign-in needed, site refuses, impossible), ' +
+      'saying exactly why. Always end with this.',
+    parameters: [
+      param('summary', 'string', true, 'Outcome for the user, including the requested answer'),
+      param('status', 'string', false, '"done" (default) or "blocked"'),
+    ],
     handledByLoop: true,
   }),
 ]
@@ -275,6 +334,61 @@ function validateDownloadId(name: string, value: unknown, knownDownloadIds?: rea
   return downloadId
 }
 
+const MODIFIER_NAMES = new Set(['control', 'ctrl', 'shift', 'alt', 'option', 'meta', 'cmd', 'command', 'win'])
+const CONTROL_NAMES = new Set(['control', 'ctrl', 'meta', 'cmd', 'command', 'win'])
+const NAMED_KEYS = new Set([
+  'enter', 'return', 'tab', 'backspace', 'delete', 'del', 'escape', 'esc', 'space', 'spacebar',
+  'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'up', 'down', 'left', 'right',
+  'home', 'end', 'pageup', 'pagedown', 'plus', 'minus',
+])
+
+/**
+ * Mirrors the runtime's parser (frontend/electron/browserRuntime/nativeInput.ts)
+ * so a malformed or browser-level shortcut is bounced back to the planner as
+ * feedback instead of failing in the browser. The runtime enforces it again.
+ */
+export function validateKeyCombo(name: string, value: unknown): string {
+  const combo = validateString(name, value).trim()
+  if (combo === '+') return combo
+  const doublePlus = combo.endsWith('++')
+  const split = combo.lastIndexOf('+')
+  const keyPart = doublePlus ? '+' : split <= 0 ? combo : combo.slice(split + 1)
+  const modifierPart = doublePlus ? combo.slice(0, -2) : split <= 0 ? '' : combo.slice(0, split)
+  const modifiers = modifierPart ? modifierPart.split('+').map((part) => part.trim().toLowerCase()) : []
+  for (const modifier of modifiers) {
+    if (!MODIFIER_NAMES.has(modifier)) {
+      throw new ToolValidationError(
+        `Argument '${name}': unknown modifier '${modifier}' in '${combo}'. Use Control, Shift, Alt or Meta, e.g. Control+m.`,
+      )
+    }
+  }
+  const key = keyPart.toLowerCase()
+  if ([...keyPart].length !== 1 && !NAMED_KEYS.has(key)) {
+    throw new ToolValidationError(
+      `Argument '${name}': unsupported key '${keyPart}'. Use one character or Enter, Tab, Escape, ` +
+        'Backspace, Delete, Space, ArrowUp/Down/Left/Right, Home, End, PageUp, PageDown.',
+    )
+  }
+  const control = modifiers.some((modifier) => CONTROL_NAMES.has(modifier))
+  const shift = modifiers.includes('shift')
+  const alt = modifiers.some((modifier) => modifier === 'alt' || modifier === 'option')
+  const reserved =
+    (alt && key === 'f') ||
+    (control && !alt && (
+      (['t', 'n', 'h', 'j', 'd'].includes(key) && !shift) ||
+      (['o', 'b'].includes(key) && shift) ||
+      (['delete', 'del'].includes(key) && shift) ||
+      ['l', 'w', 'tab', 'p', 'q', 'r', '=', '+', '-', '0', 'plus', 'minus'].includes(key)
+    ))
+  if (reserved) {
+    throw new ToolValidationError(
+      `'${combo}' is a browser shortcut (tabs, windows, zoom, print) and is never sent to the page. ` +
+        "Use open_tab or navigate, or the page's own buttons.",
+    )
+  }
+  return combo
+}
+
 function validateElementId(name: string, value: unknown, knownElementIds?: readonly string[]): string {
   const elementId = validateString(name, value)
   // A planner that invents an element id is hallucinating, and acting on a
@@ -356,6 +470,12 @@ export function validateToolCall(
     else if (p.kind === 'url') cleaned[p.name] = validateUrl(p.name, value)
     else if (p.kind === 'element_id') cleaned[p.name] = validateElementId(p.name, value, knownElementIds)
     else if (p.kind === 'download_id') cleaned[p.name] = validateDownloadId(p.name, value, knownDownloadIds)
+    else if (toolName === 'press_key' && p.name === 'key') cleaned[p.name] = validateKeyCombo(p.name, value)
+    else if (toolName === 'finish' && p.name === 'status') {
+      // Lenient: anything not clearly "blocked" is a completion claim, and the
+      // self-check verifies every completion claim anyway.
+      cleaned[p.name] = typeof value === 'string' && /^(blocked|failed|impossible|cannot)/i.test(value.trim()) ? 'blocked' : 'done'
+    }
     else cleaned[p.name] = validateString(p.name, value)
   }
 
@@ -368,7 +488,12 @@ export function validateToolCall(
 export const MAX_QUEUE_LENGTH = 4
 
 // Tools whose element ids come from the state the planner was given.
-const ELEMENT_DEPENDENT = new Set(['click', 'fill', 'upload', 'scroll', 'evaluate', 'element_bounds', 'dispatch_mouse_event', 'drag', 'extract_virtual_table'])
+const ELEMENT_DEPENDENT = new Set(['click', 'click_text', 'select_option', 'hover', 'fill', 'upload', 'scroll', 'evaluate', 'element_bounds', 'dispatch_mouse_event', 'drag', 'extract_virtual_table', 'read_text'])
+
+/** Tools that return an observation the planner must read before acting on it. */
+export const OBSERVATION_TOOLS: ReadonlySet<string> = new Set([
+  'evaluate', 'element_bounds', 'dispatch_mouse_event', 'drag', 'extract_virtual_table', 'read_text',
+])
 
 /**
  * Validates a short action queue. Beyond per-call validation, the queue as a
@@ -396,7 +521,7 @@ export function validateToolQueue(
   for (let index = 0; index < payloads.length; index++) {
     const [toolName, args] = validateToolCall(payloads[index], knownElementIds, knownDownloadIds)
 
-    if (index > 0 && ['evaluate', 'element_bounds', 'dispatch_mouse_event', 'drag', 'extract_virtual_table'].includes(validated[index - 1]![0])) {
+    if (index > 0 && OBSERVATION_TOOLS.has(validated[index - 1]![0])) {
       throw new ToolValidationError('Observe the previous tool result before planning dependent actions.')
     }
 
@@ -404,9 +529,13 @@ export function validateToolQueue(
       throw new ToolValidationError("No action may follow 'finish'.")
     }
 
+    if (index > 0 && validated[index - 1]![0] === 'ask_user') {
+      throw new ToolValidationError("No action may follow 'ask_user': wait for the user's reply.")
+    }
+
     if (navigated && ELEMENT_DEPENDENT.has(toolName)) {
       throw new ToolValidationError(
-        `'${toolName}' cannot be queued after 'navigate': element ids from the ` +
+        `'${toolName}' cannot be queued after 'navigate' or 'go_back': element ids from the ` +
           'previous page are invalid. Plan the next page in a separate step.',
       )
     }
@@ -443,7 +572,7 @@ export function validateToolQueue(
       throw new ToolValidationError(`'${toolName}' needs user approval and must be planned on its own, not queued.`)
     }
 
-    if (toolName === 'navigate') navigated = true
+    if (toolName === 'navigate' || toolName === 'go_back') navigated = true
 
     validated.push([toolName, args])
   }

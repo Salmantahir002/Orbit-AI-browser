@@ -52,6 +52,13 @@ export const AgentSessionDownloadSchema = Type.Object({
   sizeBytes: Type.Optional(Type.Number()),
 })
 
+// A popup, tip or side panel over the page, with the buttons that close it.
+export const AgentPagePopupSchema = Type.Object({
+  role: Type.String(),
+  name: Type.String(),
+  closeButtons: Type.Array(Type.Object({ id: Type.String(), name: Type.String(), auto: Type.Boolean() })),
+})
+
 // The compact semantic state. The raw accessibility tree never arrives here.
 export const AgentPageStateSchema = Type.Object({
   url: Type.Optional(Type.String()),
@@ -65,6 +72,7 @@ export const AgentPageStateSchema = Type.Object({
   downloads: Type.Optional(Type.Array(AgentSessionDownloadSchema)),
   // Set while the page waits for files (its "Attach" control was clicked).
   fileChooser: Type.Optional(Type.Union([Type.Object({ multiple: Type.Boolean() }), Type.Null()])),
+  popups: Type.Optional(Type.Array(AgentPagePopupSchema)),
 })
 
 export const AgentStepRecordSchema = Type.Object({
@@ -106,6 +114,25 @@ export const AgentFailureRecordSchema = Type.Object({
   code: Type.Optional(Type.Union([Type.String(), Type.Null()])),
 })
 
+// The agent's own up-front analysis of the goal (POST /agent/analyze). Every
+// later plan is made against it, and the self-check judges the result by it.
+export const AgentTaskBriefSchema = Type.Object({
+  summary: Type.String(),
+  task_type: Type.Optional(Type.String()),
+  requirements: Type.Array(Type.String()),
+  plan: Type.Optional(Type.Array(Type.String())),
+  content: Type.Optional(Type.String()),
+  start_url: Type.Optional(Type.String()),
+  risks: Type.Optional(Type.Array(Type.String())),
+})
+
+// The latest self-check that refused a finish: what is still missing.
+export const AgentSelfCheckFeedbackSchema = Type.Object({
+  attempt: Type.Integer(),
+  missing: Type.Array(Type.String()),
+  next_step: Type.Optional(Type.String()),
+})
+
 // The planner's entire recollection. Deliberately not a conversation
 // transcript: a bounded, structured summary keeps the prompt small and stops
 // older page content from accumulating in context.
@@ -124,6 +151,8 @@ export const AgentWorkingMemorySchema = Type.Object({
   milestones: Type.Optional(Type.Array(Type.String())),
   content_entered: Type.Optional(Type.Array(AgentContentEntrySchema)),
   session_history: Type.Optional(Type.Array(AgentSessionTaskSchema)),
+  task_brief: Type.Optional(AgentTaskBriefSchema),
+  self_check: Type.Optional(AgentSelfCheckFeedbackSchema),
 })
 
 export const AgentPlanRequestSchema = Type.Object({
@@ -151,6 +180,43 @@ export const AgentPlanResponseSchema = Type.Object({
   planner_mode: Type.Literal('llm'),
 })
 
+// ─────────────────────── analyse → act → verify contract ───────────────────────
+export const AgentAnalyzeRequestSchema = Type.Object({
+  goal: Type.String(),
+  page_state: Type.Optional(AgentPageStateSchema),
+  session_history: Type.Optional(Type.Array(AgentSessionTaskSchema)),
+})
+
+export const AgentAnalyzeResponseSchema = Type.Object({
+  brief: AgentTaskBriefSchema,
+  playbooks: Type.Array(Type.String()),
+  model: Type.String(),
+})
+
+export const AgentVerifyRequestSchema = Type.Object({
+  goal: Type.String(),
+  claimed_summary: Type.Optional(Type.String()),
+  working_memory: Type.Optional(AgentWorkingMemorySchema),
+  page_state: Type.Optional(AgentPageStateSchema),
+  // Visible page text (incl. SVG text) captured by the runtime just before the check.
+  page_text: Type.Optional(Type.String()),
+})
+
+export const AgentVerificationCheckSchema = Type.Object({
+  requirement: Type.String(),
+  met: Type.Boolean(),
+  evidence: Type.String(),
+})
+
+export const AgentVerifyResponseSchema = Type.Object({
+  complete: Type.Boolean(),
+  checks: Type.Array(AgentVerificationCheckSchema),
+  missing: Type.Array(Type.String()),
+  next_step: Type.Optional(Type.String()),
+  confidence: Type.Number({ minimum: 0, maximum: 1 }),
+  model: Type.String(),
+})
+
 export type AgentSemanticElement = Static<typeof AgentSemanticElementSchema>
 export type AgentSemanticDialog = Static<typeof AgentSemanticDialogSchema>
 export type AgentValidationIssue = Static<typeof AgentValidationIssueSchema>
@@ -162,3 +228,11 @@ export type AgentWorkingMemory = Static<typeof AgentWorkingMemorySchema>
 export type AgentPlanRequest = Static<typeof AgentPlanRequestSchema>
 export type AgentToolCall = Static<typeof AgentToolCallSchema>
 export type AgentPlanResponse = Static<typeof AgentPlanResponseSchema>
+export type AgentTaskBrief = Static<typeof AgentTaskBriefSchema>
+export type AgentSelfCheckFeedback = Static<typeof AgentSelfCheckFeedbackSchema>
+export type AgentAnalyzeRequest = Static<typeof AgentAnalyzeRequestSchema>
+export type AgentAnalyzeResponse = Static<typeof AgentAnalyzeResponseSchema>
+export type AgentVerifyRequest = Static<typeof AgentVerifyRequestSchema>
+export type AgentVerificationCheck = Static<typeof AgentVerificationCheckSchema>
+export type AgentVerifyResponse = Static<typeof AgentVerifyResponseSchema>
+export type AgentSessionTask = Static<typeof AgentSessionTaskSchema>

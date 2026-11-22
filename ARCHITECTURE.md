@@ -337,21 +337,58 @@ Voice input requires a saved Gemini provider and a fetched, selected Live transc
 
 ## Chapter 10 — Autonomous Agent Mode
 
-AgentModePanel starts AgentTask in frontend/src/services/agentRuntimeCore.ts for the active guest target. On each planning round, AgentTask extracts a semantic page state, updates working memory, and calls POST /agent/plan. The backend planner builds a request for the active AI provider, parses the response, validates tool names and arguments against agentToolRegistry, and returns an action queue with confidence and approval metadata. An unconfigured provider yields HTTP 503; invalid plans yield HTTP 422.
+AgentModePanel starts AgentTask in frontend/src/services/agentRuntimeCore.ts for the active guest target. Before the first action it asks POST /agent/analyze for a task brief (see "Analyse, act, verify" below). On each planning round, AgentTask extracts a semantic page state, updates working memory, and calls POST /agent/plan. The backend planner builds a request for the active AI provider, parses the response, validates tool names and arguments against agentToolRegistry, and returns an action queue with confidence and approval metadata. An unconfigured provider yields HTTP 503; invalid plans yield HTTP 422.
 
-The registered planner catalogue contains **16 tools**:
+The registered planner catalogue contains **22 tools**:
 
 | Planner tools | Executor and purpose |
 | --- | --- |
-| click, fill, type, press_key, navigate, scroll, upload, wait | Frontend mapping to main-process browser actions; wait maps to DOM stability; upload takes an optional download id. |
+| click, fill, type, press_key, navigate, scroll, upload, wait | Frontend mapping to main-process browser actions; wait maps to DOM stability; upload takes an optional download id. press_key accepts shortcuts such as `Control+m`; the runtime (nativeInput.ts `parseKeyCombo`) refuses the shortcuts Orbit's own window handles (Control+t/w/n/l/p/Tab, zoom, Alt+f), and the backend validator mirrors that list so the planner gets the refusal as feedback. |
+| click_text, read_text | textTargets.ts. click_text finds visible text that has no element id (SVG/canvas surfaces such as Google Slides' "Click to add title"), resolves it to its DOM node and clicks it through the same content-quad path as an element click. read_text returns the page's visible text plus SVG text, one line per drawing (in Slides, one per slide), as an observation. |
 | evaluate, element_bounds, dispatch_mouse_event, drag, extract_virtual_table | Advanced guest-page observation/action commands in advancedBrowser.ts. |
+| select_option, hover, go_back | selectControl.ts / browserRuntime.ts. select_option drives a native `<select>` with arrow keys on the focused, closed control (its popup is OS-drawn and unreachable over CDP), reading the selection after each press. Only if the keyboard has no effect does it set `selectedIndex` and dispatch input/change from script, the one place the runtime assigns a value. A missing option is reported with the list of real ones. A custom dropdown is opened with a real click and its option clicked by visible text, typed first if it is a filterable combobox. `fill` on a native select takes the same path. hover sends a native mouseMoved. go_back navigates to the previous history entry and, like navigate, ends element use in its queue. |
 | open_tab | Agent loop calls the shell to create/select a tab and switches its target ID. |
+| ask_user | Agent loop. Unlocks the tab, shows a "Your turn" card (question, optional reply, Continue / Stop task), re-locks on Continue and records the user's reply as a milestone. Stop ends the task as declined. Used for sign-in, CAPTCHA, 2FA, payment steps and choices the goal does not settle; nothing may follow it in a queue. |
 | extract | Agent loop records a planner-supplied finding; it is not a separate automatic DOM scrape. |
-| finish | Agent loop records a terminal result and ends execution. |
+| finish | `status: "blocked"` ends the task as failed with the planner's reason. Otherwise the loop runs the self-check, and ends the task only if it passes (or after three refusals). |
 
 Backend validation accepts one to four actions per plan, rejects unknown tools/arguments, enforces argument types, current element IDs, and known download IDs, and checks queue coherence. Upload must be alone; nothing follows finish or an advanced observation tool; element-dependent actions and press_key cannot follow navigate. The planner instructions also require replanning after navigate/open_tab. The frontend ends a queue when it changes targets, navigates, receives an advanced observation, encounters a failure, or refuses an action. The prompt instructions ask for more than the validator checks, so they should not be read as mechanically enforced rules.
 
 Executed and recorded loop actions count toward the default **150-step** limit, including finish and loop-handled actions. Not every refusal before execution advances that counter, so separate streak limits stop endless retries. Planner requests have a 45-second frontend timeout; up to 12 consecutive recoverable planning failures are retried with backoff from 500 ms to a maximum of 4 seconds. An unconfigured provider stops the task immediately. Six consecutive guard refusals stop the task. Stagnation detection refuses three matching action/page signatures in a nine-action window, or four matching semantic intents in a ten-action window. Routine observation/scroll tools are exempt from those windows. These limits bound the loop; they do not classify injection.
+
+### Analyse, act, verify
+
+Two LLM passes around the action loop live in backend-node/src/services/agentReviewService.ts and use the same active provider as the planner:
+
+| Pass | When | What it produces | On failure |
+| --- | --- | --- | --- |
+| Analyse (POST /agent/analyze) | Once, before the first action | A task brief: summary, 2-10 checkable requirements, ordered plan, drafted content for creation tasks (e.g. every slide's title and bullets), optional start URL, pitfalls | The task continues without a brief (planning step by step, as before) |
+| Verify (POST /agent/verify) | Every time the planner calls finish with status "done" | Per-requirement checks with evidence, what is missing, a suggested next step | The task completes, marked not verified |
+
+The brief is stored in working memory (`task_brief`) and rendered at the top of every planning prompt; its plan seeds the progress checklist. Before the verify call the loop re-extracts page state and calls read_text, so the reviewer judges fresh evidence rather than the planner's claim. A refused finish is not executed: the missing items go into working memory (`self_check`, plus a VERIFICATION_FAILED failure) and planning resumes. After three refusals the task ends as completed with `verified: false` and the unconfirmed items in its message. The sidebar shows the brief and each verdict; the result reads "Done · verified" or "Done · not fully verified".
+
+agentPlaybooks.ts holds procedures for Google Slides, Docs and Sheets (how to create, rename, write into placeholders, add slides with Control+m, check the result with read_text). They are selected by the goal's wording or the current URL and placed in the prompt before the untrusted page block. They are written guidance for the planner; nothing enforces them.
+
+### Planner output handling and provider failures
+
+Most rejected plans were spelling, not decisions. agentPlanNormalizer.ts rewrites a reply before validation:
+- Tool-name aliases: `goto` → navigate, `done` → finish, `back` → go_back.
+- Argument aliases and placement: `element: 12` → `target: "e12"`, arguments written beside the tool name, OpenAI-style `function.arguments` JSON strings.
+- Scroll directions, key lists such as `["Control","m"]`, and bare hosts (`youtube.com/…` → `https://…`).
+- A `type` aimed at an element becomes click + type, never a field-clearing fill.
+- Undocumented arguments are dropped rather than rejecting the plan.
+
+The queue then keeps its longest valid prefix: the first action must validate, and a later action that breaks a queue rule is dropped with everything after it. Every surviving action still passes the unchanged validateToolCall/validateToolQueue, so normalisation cannot add a tool, a URL scheme, an element id or a file path. Reply extraction strips `<think>` blocks, tries each JSON object in the reply (preferring one that is a plan), and retries a parse once without trailing commas. If the reply still cannot run, the planner gets one in-request repair turn showing its own reply and the exact error before the route returns 422.
+
+`planChat` no longer collapses every provider failure into one message. PlannerProviderError classifies the gateway error as `auth`, `rate_limit` or `provider`, with the configured key and key-like strings masked. The agent routes map these to 503 (the loop stops at once with the provider's reason), 429 (the loop waits 5 s, doubling to 30 s) and 502 (ordinary backoff). The renderer's planner timeout is 90 s.
+
+When an action in the task's tab opens a new tab (target=_blank, window.open), main.ts reports the opener's id with the popup. AgentModePanel collects popups whose opener is the task's current tab, and the loop switches to the newest one after the action, moving the input lock and overlay and recording a milestone. This check runs before the unverified-action handling, so a link that opens a new tab and leaves the original page unchanged is not counted as a failure. Tabs the user opens, including sign-in popups opened during ask_user, are never followed.
+
+### Popups, tips and side panels
+
+The State Builder ties each close-type button ("Got it", "Dismiss", "Close", "No thanks", "Not now", "Skip tour", ×) to the dialog, alertdialog, tooltip or complementary panel it sits in. It follows AX parent links, ignored wrapper nodes included, and reports the result as `popups` in the page state. The planner sees it as POPUPS OPEN. A bare "Close" outside any popup or panel is not listed. Buttons that commit something ("Subscribe", "Learn More") never are.
+
+Labels in AUTO_CLOSE_LABEL ("Got it", "Dismiss", "No thanks", "Not now", "Maybe later", "Skip tour/for now") are clicked by the loop itself. This happens after each page read, before planning, and again before the self-check. Each click is a normal runtime click, shown as a step, recorded as a milestone, and still screened by the approval policy. Each popup is tried once per page, so one that will not close cannot loop. "Close" and side panels are left to the planner, because the agent may have opened that dialog itself. The prompt and the Docs, Sheets and Slides playbooks tell the planner to close unneeded popups before working and before finishing. The reviewer marks an unneeded leftover popup or panel as unmet.
 
 ### Approval behavior and operational limits
 
@@ -370,7 +407,8 @@ The backend planner is stateless between requests. Continuity comes from the ren
 | Recent action/failure log | Up to 40 completed steps and 20 failures, plus retry count, page URL, invalid element IDs, and a brief previous thought. The planner renders the last 20 steps and six failures. | One AgentTask, in renderer memory. |
 | Progress and milestones | Up to 15 checklist items and 40 milestones; the first five milestones and newest entries are retained at the cap. The planner renders the last 30 milestones. | One task, with more durable progress than the rolling step log. |
 | Entered-content ledger | Up to 30 entries, with full text retained locally for similarity checks and previews/status in the transmitted snapshot; the planner renders the last 12 entries. | One task; detects duplicate append-style type actions. |
-| Findings/observations | Up to 100 findings, including planner notes and serialized advanced-tool observations, labeled as untrusted data in the planner prompt. | One task; can contain website-derived data. |
+| Findings/observations | Up to 100 findings, including planner notes and serialized advanced-tool observations, labeled as untrusted data in the planner prompt. The planner renders the last 60: the newest three up to 6,000 characters each, older ones cut to 300. | One task; can contain website-derived data. |
+| Task brief and self-check feedback | The analysis brief (requirements, plan, drafted content up to 8,000 characters) and the latest refused self-check (missing items, suggested next step). | One task; sent with every plan request. |
 | AgentSessionMemory | Last five terminated-task summaries, each with goal, status, outcome, final URL, and up to 12 milestones. Goal/outcome are capped at 400 characters. The planner renders only the last three tasks. | Current renderer lifetime; supports follow-up references across tasks. |
 | AgentBrowserMemory helper | localStorage schema for up to 50 origins and 30 successful interaction patterns per origin, plus blocked flags. | Persists across restarts; the agent loop reads only the blocked flags. |
 

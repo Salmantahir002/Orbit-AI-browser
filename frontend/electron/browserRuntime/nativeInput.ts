@@ -95,6 +95,88 @@ function resolveKeyDefinition(key: string): KeyDefinition {
   throw new BrowserRuntimeError('INVALID_ARGUMENT', `Unsupported key: ${key}`)
 }
 
+const MODIFIER_ALIASES: Record<string, number> = {
+  control: MODIFIER.ctrl, ctrl: MODIFIER.ctrl,
+  shift: MODIFIER.shift,
+  alt: MODIFIER.alt, option: MODIFIER.alt,
+  meta: MODIFIER.meta, cmd: MODIFIER.meta, command: MODIFIER.meta, win: MODIFIER.meta,
+}
+
+/** Lower-case spellings planners use for the named keys. */
+const KEY_ALIASES: Record<string, string> = {
+  esc: 'Escape', escape: 'Escape', enter: 'Enter', return: 'Enter', tab: 'Tab',
+  backspace: 'Backspace', delete: 'Delete', del: 'Delete', space: 'Space', spacebar: 'Space',
+  up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight',
+  arrowup: 'ArrowUp', arrowdown: 'ArrowDown', arrowleft: 'ArrowLeft', arrowright: 'ArrowRight',
+  home: 'Home', end: 'End', pageup: 'PageUp', pagedown: 'PageDown', plus: '+', minus: '-',
+}
+
+export type KeyCombo = { key: string; modifiers: number }
+
+/**
+ * Parses "Control+Shift+m" style shortcuts. A shortcut is not text input, so
+ * Slides' Ctrl+M (new slide) or Docs' Ctrl+B reach the page as real keydowns
+ * with the modifier flags set.
+ */
+export function parseKeyCombo(combo: string): KeyCombo {
+  const raw = combo.trim()
+  if (!raw) throw new BrowserRuntimeError('INVALID_ARGUMENT', 'A key name is required')
+
+  let keyPart: string
+  let modifierPart: string
+  if (raw === '+') {
+    keyPart = '+'
+    modifierPart = ''
+  } else if (raw.endsWith('++')) {
+    keyPart = '+'
+    modifierPart = raw.slice(0, -2)
+  } else {
+    const split = raw.lastIndexOf('+')
+    keyPart = split <= 0 ? raw : raw.slice(split + 1)
+    modifierPart = split <= 0 ? '' : raw.slice(0, split)
+  }
+
+  let modifiers = 0
+  for (const name of modifierPart ? modifierPart.split('+') : []) {
+    const bit = MODIFIER_ALIASES[name.trim().toLowerCase()]
+    if (!bit) throw new BrowserRuntimeError('INVALID_ARGUMENT', `Unknown modifier "${name}" in "${combo}"`)
+    modifiers |= bit
+  }
+
+  let key = NAMED_KEYS[keyPart] ? keyPart : KEY_ALIASES[keyPart.toLowerCase()] ?? keyPart
+  if ([...key].length === 1 && /[a-z]/i.test(key)) {
+    key = modifiers & MODIFIER.shift ? key.toUpperCase() : key.toLowerCase()
+  }
+  resolveKeyDefinition(key)
+
+  if (isReservedShortcut(key, modifiers)) {
+    throw new BrowserRuntimeError(
+      'INVALID_ARGUMENT',
+      `"${combo}" is a browser shortcut (tabs, windows, zoom, print), not a page shortcut, and is not sent to the page`,
+    )
+  }
+  return { key, modifiers }
+}
+
+/**
+ * Shortcuts the Orbit window itself handles (browserUIController's
+ * before-input-event) or that leave the page: closing or opening tabs and
+ * windows, zoom, print. A page shortcut never needs them, and a planner that
+ * sends one could close the very tab it is working in.
+ */
+export function isReservedShortcut(key: string, modifiers: number): boolean {
+  const lower = key.toLowerCase()
+  const control = (modifiers & (MODIFIER.ctrl | MODIFIER.meta)) !== 0
+  const shift = (modifiers & MODIFIER.shift) !== 0
+  const alt = (modifiers & MODIFIER.alt) !== 0
+  if (alt && lower === 'f') return true
+  if (!control || alt) return false
+  if (['t', 'n', 'h', 'j', 'd'].includes(lower)) return !shift
+  if (['o', 'b'].includes(lower)) return shift
+  if (lower === 'delete') return shift
+  return ['l', 'w', 'tab', 'p', 'q', 'r', '=', '+', '-', '0'].includes(lower)
+}
+
 function delay(ms: number): Promise<void> {
   return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve()
 }
@@ -170,8 +252,13 @@ export async function dispatchNativeType(
 
   // Iterate code points so emoji and surrogate pairs are not split.
   for (const character of text) {
-    if (character === '\n') {
+    if (character === '\r') {
+      continue // "\r\n" is one line break, not two
+    } else if (character === '\n') {
       await dispatchNativeKeyPress(session, 'Enter')
+    } else if (character === '\t') {
+      // A real Tab key, so spreadsheet grids move to the next cell.
+      await dispatchNativeKeyPress(session, 'Tab')
     } else {
       await dispatchNativeKeyPress(session, character)
     }
